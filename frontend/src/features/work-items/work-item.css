@@ -1,0 +1,23 @@
+.item-heading { margin-bottom: 1rem; }
+.item-heading h2 { font-size: clamp(1.35rem, 3vw, 2rem); letter-spacing: -.025em; overflow-wrap: anywhere; }
+.work-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(13rem, 1fr); gap: 1rem; align-items: start; }
+.panel { background: #fff; border: 1px solid var(--line); border-radius: .7rem; padding: 1.2rem; min-width: 0; }
+.panel h3 { font-size: 1.1rem; margin-bottom: .7rem; }
+.panel-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.history-step span { color: var(--muted); }
+.messages { display: grid; gap: .6rem; }
+.messages li { border: 1px solid var(--line); border-radius: .45rem; padding: .6rem .75rem; }
+.messages .user { background: #eef4fb; }
+.messages strong { font-size: .875rem; }
+.prose { white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval { display: flex; align-items: end; flex-wrap: wrap; gap: .6rem; border-top: 1px solid var(--line); padding-top: .8rem; margin-top: .8rem; }
+.approval label { flex: 1 0 10rem; }
+.revision { padding: .6rem .75rem; background: #eef3fa; border-radius: .45rem; margin: .5rem 0 .75rem; overflow-wrap: anywhere; }
+.revision dt { font-weight: 600; font-size: .875rem; }
+.revision dd { margin: 0; }
+.revision div + div { margin-top: .35rem; }
+.history-step { display: grid; gap: .1rem; text-align: left; width: 100%; }
+.history-step span { font-size: .875rem; }
+.history li { margin-top: .45rem; }
+
+@media (max-width: 57rem) { .work-grid { grid-template-columns: minmax(0, 1fr); } }

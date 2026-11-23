@@ -1,0 +1,5 @@
+.filters { display: flex; gap: .35rem; }
+.filters button { flex: 1; font-size: .875rem; }
+.filters [aria-pressed='true'], .items [aria-current='true'] { background: var(--accent-bg); border-color: #8daac8; }
+.items { display: grid; gap: .35rem; margin: .7rem 0; }
+.items button { width: 100%; text-align: left; overflow-wrap: anywhere; }

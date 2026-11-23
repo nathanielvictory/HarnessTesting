@@ -1,0 +1,24 @@
+.topbar { min-height: 4rem; padding: .65rem 1.5rem; background: #142638; color: #f8fbff; display: flex; align-items: center; gap: 1.25rem; }
+.topbar h1 { font-size: 1.35rem; letter-spacing: -.035em; }
+.repository { color: #c6d9eb; font-family: ui-monospace, monospace; font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layout { min-height: calc(100vh - 4rem); display: grid; grid-template-columns: 17rem minmax(0, 1fr); }
+.navigator { background: #fff; border-right: 1px solid var(--line); padding: 1.35rem 1.1rem; }
+.navigator section + section { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1.15rem; }
+.navigator h2 { font-size: 1rem; margin-bottom: .55rem; }
+.navigator select {
+  appearance: none;
+  padding-right: 1.6rem;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - .85rem) 50%, calc(100% - .6rem) 50%;
+  background-size: .25rem .25rem;
+  background-repeat: no-repeat;
+}
+.main { padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 2rem; }
+.empty { margin: 1.5rem 0; }
+.empty p { color: var(--muted); margin-top: .25rem; }
+.notice { border-radius: .5rem; background: #e4edf9; padding: .65rem .85rem; margin-bottom: 1rem; }
+.error { background: #fce6e2; color: #7f251b; }
+@media (max-width: 43rem) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .navigator { border-right: 0; border-bottom: 1px solid var(--line); }
+}

@@ -1,0 +1,59 @@
+name: harness
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    command: [uv, run, --locked, uvicorn, "harness.api.server:create_app", --factory, --host, "0.0.0.0", --port, "8000", --reload, --reload-dir, /app/src]
+    ports:
+      - "127.0.0.1:${HARNESS_API_PORT:-8000}:8000"
+    environment:
+      HARNESS_STATE_DIR: /data
+      HARNESS_API_PORT: "${HARNESS_API_PORT:-8000}"
+      HARNESS_FRONTEND_PORT: "${HARNESS_FRONTEND_PORT:-5173}"
+      HARNESS_MODEL: "${HARNESS_MODEL:-openai-codex:gpt-6.2-sol}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      CODEX_HOME: /codex
+      UV_PROJECT_ENVIRONMENT: /opt/harness-venv
+      UV_LINK_MODE: copy
+      PYTHONDONTWRITEBYTECODE: "1"
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /workspace/harness
+      GIT_AUTHOR_NAME: "${HARNESS_GIT_NAME:-Harness}"
+      GIT_AUTHOR_EMAIL: "${HARNESS_GIT_EMAIL:-harness@localhost}"
+      GIT_COMMITTER_NAME: "${HARNESS_GIT_NAME:-Harness}"
+      GIT_COMMITTER_EMAIL: "${HARNESS_GIT_EMAIL:-harness@localhost}"
+    volumes:
+      - ../backend:/app
+      - ..:/workspace/harness
+      - python-env:/opt/harness-venv
+      - harness-data:/data
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/projects', timeout=2).close()"]
+      interval: 3s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+
+  frontend:
+    image: node:24-bookworm-slim
+    working_dir: /app
+    command: [sh, -c, "npm ci --no-audit --no-fund && npm exec -- vite --host 0.0.0.0"]
+    ports:
+      - "127.0.0.1:${HARNESS_FRONTEND_PORT:-5173}:5173"
+    environment:
+      HARNESS_API_URL: http://backend:8000
+      HARNESS_POLL: "1"
+    volumes:
+      - ../frontend:/app
+      - node-modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  harness-data:
+  python-env:
+  node-modules:

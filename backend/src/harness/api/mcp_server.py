@@ -45,9 +45,9 @@ def build_mcp(harness: Harness) -> MCPServer:
         return await run_in_threadpool(harness.talk, item_id, message)
 
     @server.tool()
-    async def approve_draft(item_id: int, base_ref: str | None = None) -> dict[str, Any]:
+    async def approve_draft(item_id: int) -> dict[str, Any]:
         """Save the current draft as approved and advance to the next node."""
-        return await run_in_threadpool(harness.approve, item_id, base_ref)
+        return await run_in_threadpool(harness.approve, item_id)
 
     @server.tool()
     async def run_implementation(item_id: int) -> dict[str, Any]:

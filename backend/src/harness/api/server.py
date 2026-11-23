@@ -33,10 +33,6 @@ class MessageRequest(BaseModel):
     message: str
 
 
-class ApprovalRequest(BaseModel):
-    base_ref: str | None = None
-
-
 class ReviewRequest(BaseModel):
     decision: ReviewDecision
     note: str = ""
@@ -108,8 +104,8 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
         return harness.talk(item_id, body.message)
 
     @app.post("/api/work-items/{item_id}/approve")
-    def approve(item_id: int, body: ApprovalRequest) -> dict:
-        return harness.approve(item_id, body.base_ref)
+    def approve(item_id: int) -> dict:
+        return harness.approve(item_id)
 
     @app.post("/api/work-items/{item_id}/implement")
     def implement(item_id: int) -> dict:

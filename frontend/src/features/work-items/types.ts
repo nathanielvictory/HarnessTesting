@@ -54,6 +54,6 @@ export type ReviewDecision = 'accept' | 'feedback' | 'revise' | 'review_earlier'
 
 export type WorkItemCommand =
   | { type: 'messages'; message: string }
-  | { type: 'approve'; base_ref?: string | null }
+  | { type: 'approve' }
   | { type: 'implement' }
   | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null };

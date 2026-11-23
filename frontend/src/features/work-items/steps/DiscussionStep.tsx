@@ -5,7 +5,6 @@ import type { StepProps } from './types';
 
 export function DiscussionStep({ node, done, busy, perform, alignment }: StepProps & { alignment: boolean }) {
   const [message, setMessage] = useState('');
-  const [baseRef, setBaseRef] = useState(node.data?.base_commit ?? '');
 
   return <>
     <h3>{nodeLabel(node)}</h3>
@@ -25,12 +24,7 @@ export function DiscussionStep({ node, done, busy, perform, alignment }: StepPro
         <div><button className="primary" disabled={busy || !message.trim()}>Send</button></div>
       </form>
       {node.data?.draft && <div className="approval">
-        {alignment && <label>Starting Git ref
-          <input value={baseRef} placeholder="HEAD" onChange={event => setBaseRef(event.target.value)} />
-        </label>}
-        <button disabled={busy} onClick={() => perform(alignment
-          ? { type: 'approve', base_ref: baseRef || null }
-          : { type: 'approve' })}>
+        <button disabled={busy} onClick={() => perform({ type: 'approve' })}>
           Approve {alignment ? 'brief' : 'plan'}
         </button>
       </div>}

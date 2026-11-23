@@ -120,11 +120,7 @@ class Application:
                     if not (current and (current.data or {}).get("draft")):
                         self.terminal.show("Discuss the work with the agent before approving a draft.")
                         continue
-                    base_ref = None
-                    if node.node_type == NodeType.GOAL_ALIGNMENT:
-                        base = (current.data or {}).get("base_commit") or "HEAD"
-                        base_ref = self.terminal.ask(f"Starting Git ref [{base}]: ") or base
-                    work.approve(base_ref)
+                    work.approve()
                     return
                 case "":
                     continue

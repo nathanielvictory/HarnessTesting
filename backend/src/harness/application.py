@@ -71,8 +71,8 @@ class Harness:
             raise ValueError("Enter a message.")
         return self._advance(item_id, lambda work: work.talk(message.strip()))
 
-    def approve(self, item_id: int, base_ref: str | None = None) -> dict[str, Any]:
-        return self._advance(item_id, lambda work: work.approve(base_ref))
+    def approve(self, item_id: int) -> dict[str, Any]:
+        return self._advance(item_id, WorkSession.approve)
 
     def implement(self, item_id: int) -> dict[str, Any]:
         return self._advance(item_id, WorkSession.implement)

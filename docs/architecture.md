@@ -19,7 +19,7 @@ SQLAlchemy maps projects, work items, nodes, and edges to SQLite. The graph repo
 
 The shipped path below is the baseline for dogfooding. The [first iteration design](product.md#first-iteration) calls for steering and approval inside each node, including implementation. The [automation design](product.md#as-automation-grows) covers independent agent review and human gates at the points where the developer needs to intervene.
 
-Goal alignment and technical planning each collect a conversation and draft. Approving the brief records a Git baseline and advances to technical planning. Approving the plan advances to implementation. Once implementation returns a result, Harness opens a human review node.
+Goal alignment and technical planning each collect a conversation and draft. Approving the brief records the repository's current commit as the Git baseline, or reuses the saved baseline when approving a revised brief, and advances to technical planning. Approving the plan advances to implementation. Once implementation returns a result, Harness opens a human review node.
 
 At implementation review, the developer can accept the result, send feedback back to the same implementation node, revise the plan, or review an earlier brief or plan. Feedback resumes the saved implementation conversation. Revising an earlier decision creates a new node seeded with the previous approved text and the revision note. A subsequent implementation starts from the earlier baseline on a new branch. The graph retains the earlier path. Accepting implementation marks the work item complete and leaves the branch available for the developer to integrate.
 

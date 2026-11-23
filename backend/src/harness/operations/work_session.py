@@ -42,7 +42,7 @@ class WorkSession:
             case _:
                 raise ValueError("The current node is waiting for an implementation or review action.")
 
-    def approve(self, base_ref: str | None = None) -> Step:
+    def approve(self) -> Step:
         _, node = self._current()
         data = _data(node)
         draft = data.get("draft")
@@ -50,7 +50,7 @@ class WorkSession:
             raise ValueError("There is no draft to approve yet.")
         match node.node_type:
             case NodeType.GOAL_ALIGNMENT:
-                base = self.repository.commit_sha(base_ref or data.get("base_commit") or "HEAD")
+                base = self.repository.commit_sha(data.get("base_commit") or "HEAD")
                 destination = NewNode(NodeType.TECHNICAL_PLANNING, {"goal_id": node.id, "base_commit": base})
             case NodeType.TECHNICAL_PLANNING:
                 destination = NewNode(NodeType.IMPLEMENTATION, {"plan_id": node.id})

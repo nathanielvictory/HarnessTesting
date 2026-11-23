@@ -30,6 +30,12 @@ services:
       - ..:/workspace/harness
       - python-env:/opt/harness-venv
       - harness-data:/data
+      - type: bind
+        source: ${HARNESS_CODEX_AUTH_FILE:-${CODEX_HOME:-${USERPROFILE:-${HOME}}/.codex}/auth.json}
+        target: /codex/auth.json
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/projects', timeout=2).close()"]
       interval: 3s

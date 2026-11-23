@@ -1,9 +1,0 @@
-services:
-  backend:
-    volumes:
-      - type: bind
-        source: ${HARNESS_CODEX_AUTH_FILE:?Set HARNESS_CODEX_AUTH_FILE to your Codex auth.json path}
-        target: /codex/auth.json
-        read_only: true
-        bind:
-          create_host_path: false

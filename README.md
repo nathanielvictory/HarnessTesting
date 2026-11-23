@@ -40,7 +40,8 @@ The runtime can also find an existing `HarnessTest` database. Set
 
 ## Run with Docker Compose
 
-From the repository root, run the development stack.
+Sign in once on the host with `codex login`, then run the development stack
+from the repository root on Linux or Windows.
 
 ```powershell
 docker compose -f infra/compose.yaml up --build
@@ -53,14 +54,9 @@ container dependencies in their own volumes. The `harness-data` volume stores
 `/data/harness.sqlite3` and persists across normal stops and restarts. Register
 this repository as `/workspace/harness` inside the container.
 
-To use the Codex subscription from Compose, include the optional read-only
-credential mount. `HARNESS_CODEX_AUTH_FILE` should point to the `auth.json`
-created by `codex login`.
-
-```powershell
-$env:HARNESS_CODEX_AUTH_FILE = Join-Path $env:USERPROFILE '.codex\auth.json'
-docker compose -f infra/compose.yaml -f infra/compose.codex.yaml up --build
-```
+Compose mounts the host's `.codex/auth.json` read-only for the Codex
+subscription. It uses `CODEX_HOME` when set. Set `HARNESS_CODEX_AUTH_FILE`
+if you need to point Compose to a specific login file.
 
 ## Connect Codex over MCP
 

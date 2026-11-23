@@ -31,14 +31,9 @@ class Implementation:
         brief: str,
         plan: str,
         feedback: str | None,
-        checkout_path: Path,
-        branch_ref: str,
-        base_commit: str,
+        worktree: Path,
         commit_message: str,
     ) -> Outcome:
-        branch = node.branch_ref or branch_ref
-        commit = node.commit_sha or base_commit
-        worktree = self.repository.open_worktree(checkout_path, branch, commit)
         model = self.agents.model
         data = node.data or {}
         prompt = f"Approved brief\n{brief}\n\nApproved technical plan\n{plan}"
@@ -51,7 +46,6 @@ class Implementation:
             node_id=node.id, progress=self.progress,
         )
         node.commit_sha = self.repository.save_commit(worktree, commit_message)
-        node.branch_ref = branch
         node.model = model
         node.conversation = result.conversation
         if result.paused:

@@ -2,13 +2,13 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic_ai import Agent, CancellationToken, RunContext, capture_run_conversation
 from pydantic_ai.capabilities import AgentCapability, LocalWorkspace, WindowsWorkspace
 from pydantic_ai.conversation import ConversationTypeAdapter
 from pydantic_ai.exceptions import RunCancelled
-from pydantic_ai.messages import FunctionToolCallEvent
+from pydantic_ai.messages import FunctionToolCallEvent, ModelResponse
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai_harness.file_system import FileSystem
 from pydantic_ai_harness.spend_limits import SpendLimits, SpendRecordedEvent
@@ -58,10 +58,16 @@ class AgentHarness:
         usage = self.usage
         if usage is not None and node_id is not None:
             capabilities.append(SpendLimits())
+        workspace_override: Literal["new"] | None = None
         if profile.file_tools:
             if worktree is None:
                 raise ValueError("A profile with file tools needs a workspace path")
             workspace = WindowsWorkspace(worktree) if sys.platform == "win32" else LocalWorkspace(worktree)
+            if prior is not None:
+                last_response = next((message for message in reversed(prior.messages) if isinstance(message, ModelResponse)), None)
+                if last_response and last_response.workspace_ref and last_response.workspace_ref.id != workspace.working_dir:
+                    # Old conversations keep their messages when moved to the work item's checkout.
+                    workspace_override = "new"
             capabilities.extend([
                 workspace,
                 FileSystem(
@@ -89,7 +95,7 @@ class AgentHarness:
         with capture_run_conversation() as captured:
             try:
                 result = agent.run_sync(
-                    prompt, conversation=prior, cancellation_token=cancellation_token,
+                    prompt, conversation=prior, workspace=workspace_override, cancellation_token=cancellation_token,
                     event_stream_handler=report if progress is not None else None,
                 )
             except RunCancelled:

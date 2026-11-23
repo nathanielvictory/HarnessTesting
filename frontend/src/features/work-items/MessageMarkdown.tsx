@@ -48,7 +48,7 @@ function linkUrl(url: string, { itemId, repositoryPath }: RepositoryLinks, nodeI
     path = path.slice(root.length);
   } else if (path.startsWith('/') || /^[a-z]:\//i.test(path)) {
     path = path.replace(/^.*\/harness-inspection-[^/]+\/checkout\//, '')
-      .replace(/^.*\/worktrees\/\d+\//, '');
+      .replace(/^.*\/worktrees\/(?:items\/)?\d+\//, '');
     if (/^[a-z]:\//i.test(path)) return undefined;
     path = path.replace(/^\//, '');
   }

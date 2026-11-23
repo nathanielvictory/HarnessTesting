@@ -81,5 +81,5 @@ the same worker conversation. Revising the plan starts a fresh implementation
 branch from the plan's base commit. Earlier-step review lets you revisit an
 approved plan or brief.
 
-If you check out an implementation branch in your IDE, switch away from it
-before asking the harness to edit it again.
+To inspect the implementation branch in your IDE, open the work item's existing
+checkout under `worktrees/items/<work-item-id>` in the Harness state directory.

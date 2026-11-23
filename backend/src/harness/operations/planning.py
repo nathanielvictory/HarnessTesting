@@ -1,7 +1,7 @@
 from collections.abc import Callable
+from pathlib import Path
 
 from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
-from harness.git.repository import GitRepository
 from harness.graph.state import Node
 from harness.graph.traverser import Outcome
 
@@ -17,23 +17,20 @@ PROFILE = AgentProfile(
 
 
 class TechnicalPlanning:
-    def __init__(self, repository: GitRepository, agents: AgentHarness, *,
-                 progress: Callable[[str], None] | None = None) -> None:
-        self.repository = repository
+    def __init__(self, agents: AgentHarness, *, progress: Callable[[str], None] | None = None) -> None:
         self.agents = agents
         self.progress = progress
 
-    def talk(self, node: Node, brief: str, message: str) -> Outcome:
+    def talk(self, node: Node, brief: str, message: str, worktree: Path) -> Outcome:
         data = node.data or {}
         if node.conversation is None and data.get("previous_plan"):
             message = f"Previous plan\n{data['previous_plan']}\n\nRevision request\n{message}"
         prompt = f"Approved brief\n{brief}\n\nRequest\n{message}"
         model = self.agents.model
-        with self.repository.inspection_checkout(data["base_commit"]) as checkout:
-            result = self.agents.run_turn(
-                prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=checkout,
-                node_id=node.id, progress=self.progress,
-            )
+        result = self.agents.run_turn(
+            prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
+            node_id=node.id, progress=self.progress,
+        )
         node.model = model
         node.conversation = result.conversation
         if result.paused:

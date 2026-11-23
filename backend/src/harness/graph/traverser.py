@@ -18,6 +18,7 @@ class Outcome:
 class NewNode:
     node_type: str
     data: dict[str, Any] | None = None
+    branch_ref: str | None = None
 
 
 @dataclass(frozen=True)

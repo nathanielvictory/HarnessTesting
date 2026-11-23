@@ -25,8 +25,8 @@ class WorkSession:
         self.repository = repository
         self.worktrees = worktrees
         self.title = title or f"Work item {item_id}"
-        self.alignment = GoalAlignment(repository, agents, progress=progress)
-        self.planning = TechnicalPlanning(repository, agents, progress=progress)
+        self.alignment = GoalAlignment(agents, progress=progress)
+        self.planning = TechnicalPlanning(agents, progress=progress)
         self.implementation = Implementation(repository, agents, progress=progress)
 
     def graph(self) -> Graph:
@@ -36,10 +36,21 @@ class WorkSession:
         graph, node = self._current()
         match node.node_type:
             case NodeType.GOAL_ALIGNMENT:
-                return self._advance(node, lambda current: self.alignment.talk(current, message))
+                base = _data(node).get("base_commit") or self.repository.commit_sha()
+
+                def align(current: Node) -> Outcome:
+                    current.data = {**_data(current), "base_commit": base}
+                    return self.alignment.talk(current, message, self._open_checkout(current, base))
+
+                return self._advance(node, align)
             case NodeType.TECHNICAL_PLANNING:
                 goal = graph.node(_data(node)["goal_id"])
-                return self._advance(node, lambda current: self.planning.talk(current, _data(goal)["approved"], message))
+                base = _data(node)["base_commit"]
+
+                def plan(current: Node) -> Outcome:
+                    return self.planning.talk(current, _data(goal)["approved"], message, self._open_checkout(current, base))
+
+                return self._advance(node, plan)
             case _:
                 raise ValueError("The current node is waiting for an implementation or review action.")
 
@@ -49,18 +60,20 @@ class WorkSession:
         draft = data.get("draft")
         if not draft:
             raise ValueError("There is no draft to approve yet.")
+        branch = self._branch_ref(node)
         match node.node_type:
             case NodeType.GOAL_ALIGNMENT:
                 base = self.repository.commit_sha(data.get("base_commit") or "HEAD")
                 data = {**data, "base_commit": base}
-                destination = NewNode(NodeType.TECHNICAL_PLANNING, {"goal_id": node.id, "base_commit": base})
+                destination = NewNode(NodeType.TECHNICAL_PLANNING, {"goal_id": node.id, "base_commit": base}, branch)
             case NodeType.TECHNICAL_PLANNING:
-                destination = NewNode(NodeType.IMPLEMENTATION, {"plan_id": node.id})
+                destination = NewNode(NodeType.IMPLEMENTATION, {"plan_id": node.id}, branch)
             case _:
                 raise ValueError("Only goal alignment and planning have drafts to approve.")
 
         def approve_draft(current: Node) -> Outcome:
             current.data = {**data, "approved": draft}
+            current.branch_ref = branch
             return Outcome("approved")
 
         return self._advance(node, approve_draft, destination)
@@ -73,20 +86,27 @@ class WorkSession:
         feedback = None
         if history and history[-1].outcome == ReviewDecision.FEEDBACK:
             feedback = (history[-1].data or {}).get("note")
-        path = self.worktrees / str(node.id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
         def run(current: Node) -> Outcome:
+            current.branch_ref = current.branch_ref or plan.branch_ref or self._branch_ref(current)
+            checkout = self._open_checkout(
+                current, current.commit_sha or _data(plan)["base_commit"],
+                legacy_path=self.worktrees / str(current.id),
+            )
             return self.implementation.run(
                 current, brief=_data(goal)["approved"], plan=_data(plan)["approved"], feedback=feedback,
-                checkout_path=path, branch_ref=f"refs/heads/harness/{self.item_id}-{node.id}",
-                base_commit=_data(plan)["base_commit"], commit_message=self.title,
+                worktree=checkout, commit_message=self.title,
             )
 
-        step = self._advance(node, run, NewNode(NodeType.HUMAN_REVIEW, {"target_id": node.id}))
-        if path.is_dir():
-            self.repository.remove_worktree(path)
-        return step
+        return self._advance(node, run, NewNode(NodeType.HUMAN_REVIEW, {"target_id": node.id}))
+
+    def _branch_ref(self, node: Node) -> str:
+        return node.branch_ref or f"refs/heads/harness/{self.item_id}-{node.id}"
+
+    def _open_checkout(self, node: Node, commit: str, *, legacy_path: Path | None = None) -> Path:
+        checkout = self.worktrees / "items" / str(self.item_id)
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        node.branch_ref = self._branch_ref(node)
+        return self.repository.open_worktree(checkout, node.branch_ref, commit, legacy_path=legacy_path)
 
     def review_target(self) -> Node:
         graph, review = self._current(NodeType.HUMAN_REVIEW)

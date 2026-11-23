@@ -57,7 +57,10 @@ class GraphRepository:
     def add_successor(self, node: Node, target: NewNode, outcome: Outcome, order: int) -> tuple[Node, Edge]:
         with self.database.session() as session:
             source = _save_node(session, node)
-            record = NodeRecord(work_item_id=source.work_item_id, node_type=NodeType(target.node_type), data=target.data)
+            record = NodeRecord(
+                work_item_id=source.work_item_id, node_type=NodeType(target.node_type),
+                data=target.data, branch_ref=target.branch_ref,
+            )
             session.add(record)
             session.flush()
             edge = Edge(source.id, record.id, order, outcome.name, outcome.data)

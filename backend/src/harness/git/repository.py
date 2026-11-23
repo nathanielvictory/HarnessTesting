@@ -1,8 +1,5 @@
 import subprocess
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 
 class GitError(RuntimeError):
@@ -29,34 +26,48 @@ class GitRepository:
     def commit_sha(self, revision: str = "HEAD") -> str:
         return _git(self.path, "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}").strip()
 
-    def open_worktree(self, path: Path, branch_ref: str, commit_sha: str) -> Path:
+    def open_worktree(self, path: Path, branch_ref: str, commit_sha: str, *, legacy_path: Path | None = None) -> Path:
         if not branch_ref.startswith("refs/heads/"):
             raise ValueError("Use a full branch ref under refs/heads/")
         _git(self.path, "check-ref-format", branch_ref)
         path = path.resolve()
         name = branch_ref.removeprefix("refs/heads/")
         expected = self.commit_sha(commit_sha)
-        existing = _git(self.path, "for-each-ref", "--format=%(refname)", branch_ref).splitlines()
-        if branch_ref in existing:
-            if self.commit_sha(branch_ref) != expected:
-                raise GitError(f"{branch_ref} no longer points to saved commit {expected}")
-            checked_out = self._find_worktree(branch_ref)
-            if checked_out is not None:
-                if checked_out != path:
-                    raise GitError(f"{branch_ref} is already checked out at {checked_out}")
+        exists = branch_ref in _git(self.path, "for-each-ref", "--format=%(refname)", branch_ref).splitlines()
+        if exists and self.commit_sha(branch_ref) != expected:
+            raise GitError(f"{branch_ref} no longer points to saved commit {expected}")
+
+        worktrees = self._worktree_branches()
+        checked_out = next((directory for directory, ref in worktrees.items() if ref == branch_ref), None)
+        if checked_out is not None and checked_out != path:
+            if legacy_path is None or checked_out != legacy_path.resolve() or path.exists():
+                raise GitError(f"{branch_ref} is already checked out at {checked_out}")
+            if checked_out.exists():
+                _git(self.path, "worktree", "move", "--", str(checked_out), str(path))
                 return path
-            _git(self.path, "worktree", "add", "--", str(path), name)
+
+        if path in worktrees and (path / ".git").is_file():
+            if worktrees[path] == branch_ref:
+                return path
+            if _git(path, "status", "--porcelain", "--untracked-files=normal"):
+                raise GitError("The work item checkout has uncommitted changes. Save them before changing branches.")
+            branch = (name,) if exists else ("-c", name, expected)
+            _git(path, "switch", "--no-overwrite-ignore", *branch)
         else:
-            _git(self.path, "worktree", "add", "-b", name, "--", str(path), expected)
+            branch = () if exists else ("-b", name)
+            recreate = ("--force",) if path in worktrees or checked_out is not None else ()
+            _git(self.path, "worktree", "add", *recreate, *branch, "--", str(path), name if exists else expected)
         return path
 
-    def _find_worktree(self, branch_ref: str) -> Path | None:
+    def _worktree_branches(self) -> dict[Path, str | None]:
         listing = _git(self.path, "worktree", "list", "--porcelain", "-z")
+        worktrees = {}
         for entry in listing.split("\0\0"):
             fields = entry.split("\0")
-            if f"branch {branch_ref}" in fields:
-                return Path(fields[0].removeprefix("worktree ")).resolve()
-        return None
+            if fields[0].startswith("worktree "):
+                path = Path(fields[0].removeprefix("worktree ")).resolve()
+                worktrees[path] = next((field.removeprefix("branch ") for field in fields if field.startswith("branch ")), None)
+        return worktrees
 
     def save_commit(self, worktree: Path, message: str) -> str:
         _git(worktree, "add", "-A")
@@ -90,16 +101,3 @@ class GitRepository:
     def merge(self, worktree: Path, revision: str) -> str:
         _git(worktree, "merge", "--no-edit", "--", self.commit_sha(revision))
         return _git(worktree, "rev-parse", "HEAD").strip()
-
-    def remove_worktree(self, worktree: Path) -> None:
-        _git(self.path, "worktree", "remove", "--", str(worktree.resolve()))
-
-    @contextmanager
-    def inspection_checkout(self, revision: str) -> Iterator[Path]:
-        with TemporaryDirectory(prefix="harness-inspection-") as folder:
-            checkout = Path(folder) / "checkout"
-            _git(self.path, "worktree", "add", "--detach", "--", str(checkout), self.commit_sha(revision))
-            try:
-                yield checkout
-            finally:
-                self.remove_worktree(checkout)

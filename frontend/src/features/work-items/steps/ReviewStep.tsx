@@ -39,7 +39,7 @@ export function ReviewStep({ target, node, done, busy, activity, links, perform,
         ? 'Check the saved changes against the brief. Accept when they meet the goal, send feedback for another implementation turn, or revisit the brief or plan if the direction needs to change.'
         : 'Read the decision that guided implementation. Revise it to try again from the original snapshot, or return to the implementation review.'}
     </p>
-    {target.branch_ref && <dl className="revision">
+    {target.node_type === 'implementation' && target.branch_ref && <dl className="revision">
       <div><dt>Branch</dt><dd><code>{target.branch_ref.replace(/^refs\/heads\//, '')}</code></dd></div>
       <div><dt>Commit</dt><dd><code>{node.data?.last_decision?.reviewed_commit_sha || target.commit_sha}</code></dd></div>
     </dl>}

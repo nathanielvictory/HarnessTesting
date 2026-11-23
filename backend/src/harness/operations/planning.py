@@ -1,4 +1,4 @@
-from harness.agents.harness import AgentHarness, AgentProfile
+from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
 from harness.git.repository import GitRepository
 from harness.graph.state import Node
 from harness.graph.traverser import Outcome
@@ -10,7 +10,7 @@ PROFILE = AgentProfile(
         "Identify the affected components, implementation steps, and verification. "
         "If the user asks for changes, reply with the complete revised plan."
     ),
-    file_tools=("read_file", "list_files", "grep"),
+    file_tools=READ_ONLY_FILE_TOOLS,
 )
 
 

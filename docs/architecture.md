@@ -19,7 +19,7 @@ SQLAlchemy maps projects, work items, nodes, and edges to SQLite. The graph repo
 
 The shipped path below is the baseline for dogfooding. The [first iteration design](product.md#first-iteration) calls for steering and approval inside each node, including implementation. The [automation design](product.md#as-automation-grows) covers independent agent review and human gates at the points where the developer needs to intervene.
 
-Goal alignment and technical planning each collect a conversation and draft. Approving the brief records the repository's current commit as the Git baseline, or reuses the saved baseline when approving a revised brief, and advances to technical planning. Approving the plan advances to implementation. Once implementation returns a result, Harness opens a human review node.
+Creating a work item records the repository's current commit on the goal alignment node as the Git baseline. Goal alignment and technical planning each collect a conversation and draft. Approving the brief advances to technical planning with the same baseline. Approving the plan advances to implementation, which starts its branch from that baseline. Once implementation returns a result, Harness opens a human review node.
 
 At implementation review, the developer can accept the result, send feedback back to the same implementation node, revise the plan, or review an earlier brief or plan. Feedback resumes the saved implementation conversation. Revising an earlier decision creates a new node seeded with the previous approved text and the revision note. A subsequent implementation starts from the earlier baseline on a new branch. The graph retains the earlier path. Accepting implementation marks the work item complete and leaves the branch available for the developer to integrate.
 
@@ -29,8 +29,8 @@ The path is defined in Python and a plan leads to one implementation node at a t
 
 The [agent harness](../backend/src/harness/agents/harness.py) adapts Pydantic AI and restores the node's saved conversation for a new turn. Each operation supplies its own agent profile and builds the prompt for the turn.
 
-- **Goal alignment** uses its instructions and conversation. It has no repository file tools today.
-- **Technical planning** receives the approved brief and reads the target repository from a detached worktree at the Git baseline.
+- **Goal alignment** can list, search, and read repository files from a detached worktree at the Git baseline.
+- **Technical planning** receives the approved brief and uses the same read-only tools against the same Git baseline.
 - **Implementation** receives the approved brief and plan, plus review feedback when applicable. It can read and edit files in an assigned worktree. Harness creates any resulting commit and records the branch ref and SHA.
 
 The implementation branch remains after the worktree is removed. That branch keeps its history reachable and provides a name for inspection or integration. On resumption, Harness checks that the branch still points to the saved SHA. Review transitions can also record the exact commit reviewed.

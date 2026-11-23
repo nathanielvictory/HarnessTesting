@@ -42,7 +42,7 @@ When a node has multiple available transitions, the user chooses which one to ta
 
 **Conversation** — The saved exchange associated with an agent-driven node. Resuming that node continues its conversation with the relevant context.
 
-**Git baseline** — The commit chosen as the starting point for implementation.
+**Git baseline** — The commit recorded at work item creation for goal alignment, technical planning, and the start of implementation.
 
 **Saved Git state** — The branch ref and commit that identify where work was saved. The branch identifies the line of work to resume. The commit identifies the exact snapshot for resumption or inspection.
 

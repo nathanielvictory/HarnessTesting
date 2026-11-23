@@ -48,9 +48,10 @@ class Harness:
         return self.catalog.work_items(project_id, status)
 
     def create_work_item(self, project_id: int, title: str | None = None) -> WorkItemEntry:
-        self.catalog.get_project(project_id)
+        project = self.catalog.get_project(project_id)
         title = (title or "").strip() or None
-        return self.catalog.add_work_item(project_id, title)
+        base = GitRepository(Path(project.repository_path)).commit_sha()
+        return self.catalog.add_work_item(project_id, title, base_commit=base)
 
     def inspect(self, item_id: int) -> dict[str, Any]:
         project, item = self.catalog.get_work_item(item_id)

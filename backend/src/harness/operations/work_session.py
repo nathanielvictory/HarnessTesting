@@ -24,7 +24,7 @@ class WorkSession:
         self.repository = repository
         self.worktrees = worktrees
         self.title = title or f"Work item {item_id}"
-        self.alignment = GoalAlignment(agents)
+        self.alignment = GoalAlignment(repository, agents)
         self.planning = TechnicalPlanning(repository, agents)
         self.implementation = Implementation(repository, agents)
 
@@ -51,6 +51,7 @@ class WorkSession:
         match node.node_type:
             case NodeType.GOAL_ALIGNMENT:
                 base = self.repository.commit_sha(data.get("base_commit") or "HEAD")
+                data = {**data, "base_commit": base}
                 destination = NewNode(NodeType.TECHNICAL_PLANNING, {"goal_id": node.id, "base_commit": base})
             case NodeType.TECHNICAL_PLANNING:
                 destination = NewNode(NodeType.IMPLEMENTATION, {"plan_id": node.id})

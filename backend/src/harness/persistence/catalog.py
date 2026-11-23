@@ -60,10 +60,12 @@ class Catalog:
                 raise LookupError(f"Project {project_id} does not exist")
             return ProjectEntry(row.id, row.name, row.repository_path)
 
-    def add_work_item(self, project_id: int, title: str | None) -> WorkItemEntry:
+    def add_work_item(self, project_id: int, title: str | None, *, base_commit: str) -> WorkItemEntry:
         with self.database.session() as session:
             item = WorkItem(project_id=project_id, title=title)
-            item.entry_node = Node(work_item=item, node_type=NodeType.GOAL_ALIGNMENT)
+            item.entry_node = Node(
+                work_item=item, node_type=NodeType.GOAL_ALIGNMENT, data={"base_commit": base_commit},
+            )
             session.add(item)
             session.flush()
             return WorkItemEntry(item.id, item.title, item.status)

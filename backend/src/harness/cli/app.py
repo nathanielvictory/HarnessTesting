@@ -66,7 +66,13 @@ class Application:
             if selected == "back":
                 return None
             if selected == "new":
-                return self.catalog.add_work_item(project.id, self.terminal.ask("Title (optional): ") or None)
+                title = self.terminal.ask("Title (optional): ") or None
+                try:
+                    base = GitRepository(Path(project.repository_path)).commit_sha()
+                except (GitError, OSError) as exc:
+                    self.terminal.show(str(exc))
+                    continue
+                return self.catalog.add_work_item(project.id, title, base_commit=base)
             if selected == "toggle":
                 status = WorkItemStatus.COMPLETE if status is WorkItemStatus.IN_PROGRESS else WorkItemStatus.IN_PROGRESS
             else:

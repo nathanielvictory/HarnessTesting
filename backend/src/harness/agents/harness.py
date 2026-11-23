@@ -13,6 +13,9 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai_harness.file_system import FileSystem
 
 
+READ_ONLY_FILE_TOOLS = ("read_file", "list_files", "grep")
+
+
 @dataclass(frozen=True)
 class AgentProfile:
     instructions: str

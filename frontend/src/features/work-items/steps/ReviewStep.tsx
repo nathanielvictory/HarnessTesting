@@ -24,7 +24,7 @@ export function ReviewStep({ target, node, done, busy, perform, earlier }: Props
   const [decision, setDecision] = useState<ReviewDecision | ''>('');
   const [note, setNote] = useState('');
   const [earlierId, setEarlierId] = useState(earlier[0]?.id ?? null);
-  const choices = target.action === 'implementation'
+  const choices = target.node_type === 'implementation'
     ? implementationChoices.filter(choice => choice.value !== 'review_earlier' || earlier.length > 0)
     : earlierChoices;
   const needsNote = decision === 'feedback' || decision === 'revise';

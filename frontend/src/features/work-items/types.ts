@@ -10,7 +10,7 @@ export interface WorkItem {
 
 export interface WorkNode {
   id: number;
-  action: string;
+  node_type: string;
   model: string | null;
   branch_ref: string | null;
   commit_sha: string | null;

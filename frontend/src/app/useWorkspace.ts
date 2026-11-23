@@ -127,8 +127,8 @@ export function useWorkspace() {
 // Preserve the existing automatic follow-up after a browser approval or review.
 function followUpCommand(detail: WorkItemDetail): WorkItemCommand | undefined {
   const current = detail.nodes.find(node => node.id === detail.current_node_id);
-  if (current?.action === 'implementation') return { type: 'implement' };
-  if (current?.action === 'technical_planning' && !current.messages.length) {
+  if (current?.node_type === 'implementation') return { type: 'implement' };
+  if (current?.node_type === 'technical_planning' && !current.messages.length) {
     return { type: 'messages', message: current.data?.revision_note || 'Draft the technical plan.' };
   }
 }

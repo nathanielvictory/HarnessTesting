@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from .work_item import WorkItem
 
 
-class NodeAction(StrEnum):
-    """Persisted action for a graph node."""
+class NodeType(StrEnum):
+    """Type of step represented by a graph node."""
 
     GOAL_ALIGNMENT = "goal_alignment"
     TECHNICAL_PLANNING = "technical_planning"
@@ -30,14 +30,16 @@ class Node(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     work_item_id: Mapped[int] = mapped_column(ForeignKey("work_items.id"), index=True)
-    action: Mapped[NodeAction] = mapped_column(
+    # Keep the existing SQLite names so saved graphs reopen without a migration.
+    node_type: Mapped[NodeType] = mapped_column(
+        "action",
         Enum(
-            NodeAction,
+            NodeType,
             name="node_action",
             native_enum=False,
             create_constraint=True,
             validate_strings=True,
-            values_callable=lambda actions: [action.value for action in actions],
+            values_callable=lambda node_types: [node_type.value for node_type in node_types],
         )
     )
     model: Mapped[str | None]

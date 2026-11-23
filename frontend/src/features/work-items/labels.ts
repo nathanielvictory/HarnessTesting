@@ -1,6 +1,6 @@
 import type { WorkItem, WorkNode } from './types';
 
-const actionLabels: Readonly<Record<string, string>> = {
+const nodeTypeLabels: Readonly<Record<string, string>> = {
   goal_alignment: 'Goal alignment',
   technical_planning: 'Technical planning',
   implementation: 'Implementation',
@@ -10,7 +10,7 @@ const actionLabels: Readonly<Record<string, string>> = {
 };
 
 export function nodeLabel(node?: WorkNode): string {
-  return node ? actionLabels[node.action] ?? node.action : 'No active step';
+  return node ? nodeTypeLabels[node.node_type] ?? node.node_type : 'No active step';
 }
 
 export function workItemTitle(item: WorkItem): string {

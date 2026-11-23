@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from .database import Database
-from .models import Node, NodeAction, Project, WorkItem, WorkItemStatus
+from .models import Node, NodeType, Project, WorkItem, WorkItemStatus
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class Catalog:
     def add_work_item(self, project_id: int, title: str | None) -> WorkItemEntry:
         with self.database.session() as session:
             item = WorkItem(project_id=project_id, title=title)
-            item.entry_node = Node(work_item=item, action=NodeAction.GOAL_ALIGNMENT)
+            item.entry_node = Node(work_item=item, node_type=NodeType.GOAL_ALIGNMENT)
             session.add(item)
             session.flush()
             return WorkItemEntry(item.id, item.title, item.status)

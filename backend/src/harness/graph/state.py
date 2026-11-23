@@ -5,7 +5,7 @@ from typing import Any
 @dataclass
 class Node:
     id: int
-    action: str
+    node_type: str
     model: str | None = None
     conversation: dict[str, Any] | None = None
     branch_ref: str | None = None

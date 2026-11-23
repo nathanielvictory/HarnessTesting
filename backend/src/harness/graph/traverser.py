@@ -16,7 +16,7 @@ class Outcome:
 
 @dataclass(frozen=True)
 class NewNode:
-    action: str
+    node_type: str
     data: dict[str, Any] | None = None
 
 
@@ -63,9 +63,9 @@ class Traverser:
             node = graph.node(step.edge.to_node_id) if step.edge is not None else None
 
     def _advance(self, graph: Graph, node: Node) -> Step:
-        operation = self.operations.get(node.action)
+        operation = self.operations.get(node.node_type)
         if operation is None:
-            raise ValueError(f"No operation registered for {node.action!r}")
+            raise ValueError(f"No operation registered for {node.node_type!r}")
         outcome = operation(node)
         destination = self.next_node(graph, node, outcome)
         if isinstance(destination, NewNode):

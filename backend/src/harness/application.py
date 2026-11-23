@@ -13,7 +13,7 @@ from .operations.work_session import WorkSession
 from .persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from .persistence.database import Database
 from .persistence.graph.repository import GraphRepository
-from .persistence.models import NodeAction, WorkItemStatus
+from .persistence.models import NodeType, WorkItemStatus
 from .runtime import RuntimeSettings, model_settings
 
 
@@ -113,19 +113,19 @@ def _node_view(node: Node) -> dict[str, Any]:
             if kind in ("user-prompt", "text") and isinstance(content, str):
                 messages.append({"role": "user" if kind == "user-prompt" else "assistant", "text": content})
     return {
-        "id": node.id, "action": node.action, "model": node.model,
+        "id": node.id, "node_type": node.node_type, "model": node.model,
         "branch_ref": node.branch_ref, "commit_sha": node.commit_sha,
         "data": node.data, "messages": messages,
     }
 
 
 def _review_view(graph: Graph, node: Node | None) -> dict[str, Any] | None:
-    if node is None or node.action != NodeAction.HUMAN_REVIEW:
+    if node is None or node.node_type != NodeType.HUMAN_REVIEW:
         return None
     data = node.data or {}
     target = graph.node(data["target_id"])
     earlier = []
-    if target.action == NodeAction.IMPLEMENTATION:
+    if target.node_type == NodeType.IMPLEMENTATION:
         plan = graph.node((target.data or {})["plan_id"])
         goal = graph.node((plan.data or {})["goal_id"])
         earlier = [plan.id, goal.id]

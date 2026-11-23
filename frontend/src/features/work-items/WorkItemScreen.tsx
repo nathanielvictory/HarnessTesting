@@ -58,10 +58,10 @@ function CurrentStep({ detail, busy, perform }: Props) {
     }));
     return <ReviewStep {...step} target={target} earlier={earlier} />;
   }
-  switch (node.action) {
+  switch (node.node_type) {
     case 'goal_alignment':
     case 'technical_planning':
-      return <DiscussionStep {...step} alignment={node.action === 'goal_alignment'} />;
+      return <DiscussionStep {...step} alignment={node.node_type === 'goal_alignment'} />;
     case 'implementation':
       return <ImplementationStep {...step} />;
     default:

@@ -10,7 +10,7 @@ from harness.operations.work_session import WorkSession
 from harness.persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
 from harness.persistence.graph.repository import GraphRepository
-from harness.persistence.models import NodeAction, WorkItemStatus
+from harness.persistence.models import NodeType, WorkItemStatus
 
 from .agent import InteractiveAgent
 from .terminal import Quit, Terminal
@@ -84,16 +84,16 @@ class Application:
             InteractiveAgent(self.model, self.terminal, show_graph), self.state_dir / "worktrees", item.title,
         )
         while (node := work.graph().current_node()) is not None:
-            match node.action:
-                case NodeAction.GOAL_ALIGNMENT | NodeAction.TECHNICAL_PLANNING:
+            match node.node_type:
+                case NodeType.GOAL_ALIGNMENT | NodeType.TECHNICAL_PLANNING:
                     self._talk(work, node)
-                case NodeAction.IMPLEMENTATION:
+                case NodeType.IMPLEMENTATION:
                     self._check_pause(work.implement())
-                case NodeAction.HUMAN_REVIEW:
+                case NodeType.HUMAN_REVIEW:
                     if self._review(work):
                         return
                 case _:
-                    self.terminal.show(f"No interactive operation is configured for {node.action}.")
+                    self.terminal.show(f"No interactive operation is configured for {node.node_type}.")
                     return
 
     def _talk(self, work: WorkSession, node: Node) -> None:
@@ -103,7 +103,7 @@ class Application:
             self.terminal.show(data["draft"])
         elif node.conversation is None:
             initial = data.get("revision_note")
-            if initial or node.action == NodeAction.TECHNICAL_PLANNING:
+            if initial or node.node_type == NodeType.TECHNICAL_PLANNING:
                 step = work.talk(initial or "Draft the technical plan.")
                 self._check_pause(step)
                 self.terminal.show((step.node.data or {})["draft"])
@@ -121,7 +121,7 @@ class Application:
                         self.terminal.show("Discuss the work with the agent before approving a draft.")
                         continue
                     base_ref = None
-                    if node.action == NodeAction.GOAL_ALIGNMENT:
+                    if node.node_type == NodeType.GOAL_ALIGNMENT:
                         base = (current.data or {}).get("base_commit") or "HEAD"
                         base_ref = self.terminal.ask(f"Starting Git ref [{base}]: ") or base
                     work.approve(base_ref)
@@ -137,7 +137,7 @@ class Application:
         target = work.review_target()
         data = target.data or {}
         self.terminal.show(f"\nReview · {_label(target)}")
-        if target.action == NodeAction.IMPLEMENTATION:
+        if target.node_type == NodeType.IMPLEMENTATION:
             self.terminal.show(f"Branch: {(target.branch_ref or '').removeprefix('refs/heads/')} · commit {target.commit_sha}")
             self.terminal.show(data.get("summary", ""))
             options = [
@@ -195,4 +195,4 @@ class Application:
 
 
 def _label(node: Node) -> str:
-    return f"#{node.id} {node.action.replace('_', ' ')}"
+    return f"#{node.id} {node.node_type.replace('_', ' ')}"

@@ -7,7 +7,7 @@ from harness.graph.traverser import NewNode, Outcome
 from ..database import Database
 from ..models import Edge as EdgeRecord
 from ..models import Node as NodeRecord
-from ..models import NodeAction, WorkItem, WorkItemStatus
+from ..models import NodeType, WorkItem, WorkItemStatus
 
 
 class GraphRepository:
@@ -29,14 +29,14 @@ class GraphRepository:
                  for row in edges],
             )
 
-    def add_node(self, work_item_id: int, action: str, *, entry: bool = False) -> Node:
+    def add_node(self, work_item_id: int, node_type: str, *, entry: bool = False) -> Node:
         with self.database.session() as session:
             item = session.get(WorkItem, work_item_id)
             if item is None:
                 raise LookupError(f"Work item {work_item_id} does not exist")
             if entry and item.entry_node_id is not None:
                 raise ValueError(f"Work item {work_item_id} already has an entry node")
-            record = NodeRecord(work_item=item, action=NodeAction(action))
+            record = NodeRecord(work_item=item, node_type=NodeType(node_type))
             session.add(record)
             if entry:
                 item.entry_node = record
@@ -57,7 +57,7 @@ class GraphRepository:
     def add_successor(self, node: Node, target: NewNode, outcome: Outcome, order: int) -> tuple[Node, Edge]:
         with self.database.session() as session:
             source = _save_node(session, node)
-            record = NodeRecord(work_item_id=source.work_item_id, action=NodeAction(target.action), data=target.data)
+            record = NodeRecord(work_item_id=source.work_item_id, node_type=NodeType(target.node_type), data=target.data)
             session.add(record)
             session.flush()
             edge = Edge(source.id, record.id, order, outcome.name, outcome.data)
@@ -90,7 +90,7 @@ def _save_edge(session: Session, edge: Edge) -> None:
 def _load_node(record: NodeRecord) -> Node:
     return Node(
         id=record.id,
-        action=record.action.value,
+        node_type=record.node_type.value,
         model=record.model,
         conversation=record.conversation,
         branch_ref=record.branch_ref,

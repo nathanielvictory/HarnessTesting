@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { UsageSummary } from '../usage/UsageSummary';
 import { Activity } from './Activity';
 import { Conversation } from './Conversation';
 import { GraphHistory } from './GraphHistory';
@@ -32,6 +33,7 @@ export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
       </div>
       {!done && <button disabled={busy} onClick={() => perform({ type: 'close' })}>Mark complete</button>}
     </div>
+    <UsageSummary scope="work-items" id={detail.work_item.id} busy={busy} />
     <div className="work-grid">
       <section className="panel">
         {historical && historical.id !== current?.id

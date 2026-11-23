@@ -15,6 +15,7 @@ from .persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from .persistence.database import Database
 from .persistence.graph.repository import GraphRepository
 from .persistence.models import NodeType, WorkItemStatus
+from .persistence.usage import UsageRepository, UsageSummary
 from .runtime import RuntimeSettings, model_settings
 
 
@@ -28,9 +29,10 @@ class Harness:
     def __init__(self, database: Database, settings: RuntimeSettings, *, agents: AgentHarness | None = None) -> None:
         self.catalog = Catalog(database)
         self.graphs = GraphRepository(database)
+        self.usage = UsageRepository(database)
         self.settings = settings
         self.agents = agents if agents is not None else AgentHarness(
-            settings.model, model_settings=model_settings(settings.model)
+            settings.model, model_settings=model_settings(settings.model), usage=self.usage,
         )
         self._item_locks: dict[int, Lock] = {}
         self._activity: dict[int, tuple[str, list[str]]] = {}
@@ -48,6 +50,14 @@ class Harness:
     def work_items(self, project_id: int, status: WorkItemStatus) -> list[WorkItemEntry]:
         self.catalog.get_project(project_id)
         return self.catalog.work_items(project_id, status)
+
+    def project_usage(self, project_id: int) -> UsageSummary:
+        self.catalog.get_project(project_id)
+        return self.usage.summarize(project_id)
+
+    def work_item_usage(self, item_id: int) -> UsageSummary:
+        project, item = self.catalog.get_work_item(item_id)
+        return self.usage.summarize(project.id, item_id=item.id)
 
     def create_work_item(self, project_id: int, title: str | None = None) -> WorkItemEntry:
         project = self.catalog.get_project(project_id)

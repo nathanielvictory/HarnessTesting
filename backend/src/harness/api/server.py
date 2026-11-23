@@ -16,6 +16,7 @@ from harness.operations.review import ReviewDecision
 from harness.persistence.catalog import ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
 from harness.persistence.models import WorkItemStatus
+from harness.persistence.usage import UsageSummary
 from harness.runtime import RuntimeSettings
 
 from .mcp_server import build_mcp
@@ -88,6 +89,10 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
     def register_project(body: ProjectRequest) -> ProjectEntry:
         return harness.register_project(body.name, body.repository_path)
 
+    @app.get("/api/projects/{project_id}/usage")
+    def project_usage(project_id: int) -> UsageSummary:
+        return harness.project_usage(project_id)
+
     @app.get("/api/projects/{project_id}/work-items")
     def work_items(project_id: int, status: WorkItemStatus = WorkItemStatus.IN_PROGRESS) -> list[WorkItemEntry]:
         return harness.work_items(project_id, status)
@@ -99,6 +104,10 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
     @app.get("/api/work-items/{item_id}")
     def inspect(item_id: int) -> dict:
         return harness.inspect(item_id)
+
+    @app.get("/api/work-items/{item_id}/usage")
+    def work_item_usage(item_id: int) -> UsageSummary:
+        return harness.work_item_usage(item_id)
 
     @app.get("/api/work-items/{item_id}/activity")
     def activity(item_id: int) -> dict | None:

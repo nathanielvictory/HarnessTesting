@@ -33,7 +33,7 @@ class GoalAlignment:
         with self.repository.inspection_checkout(base) as checkout:
             result = self.agents.run_turn(
                 message, profile=PROFILE, model=model, conversation=node.conversation, worktree=checkout,
-                progress=self.progress,
+                node_id=node.id, progress=self.progress,
             )
         node.model = model
         node.conversation = result.conversation

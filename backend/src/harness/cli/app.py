@@ -11,6 +11,7 @@ from harness.persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
 from harness.persistence.graph.repository import GraphRepository
 from harness.persistence.models import NodeType, WorkItemStatus
+from harness.persistence.usage import UsageRepository
 
 from .agent import InteractiveAgent
 from .terminal import Quit, Terminal
@@ -20,6 +21,7 @@ class Application:
     def __init__(self, database: Database, state_dir: Path, model: str, terminal: Terminal) -> None:
         self.catalog = Catalog(database)
         self.store = GraphRepository(database)
+        self.usage = UsageRepository(database)
         self.state_dir = state_dir
         self.model = model
         self.terminal = terminal
@@ -85,9 +87,10 @@ class Application:
         if item.status is WorkItemStatus.COMPLETE:
             show_graph()
             return
+        agent = InteractiveAgent(self.model, self.terminal, show_graph, usage=self.usage)
         work = WorkSession(
             item.id, self.store, GitRepository(Path(project.repository_path)),
-            InteractiveAgent(self.model, self.terminal, show_graph), self.state_dir / "worktrees", item.title,
+            agent, self.state_dir / "worktrees", item.title,
         )
         while (node := work.graph().current_node()) is not None:
             match node.node_type:

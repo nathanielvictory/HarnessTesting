@@ -1,4 +1,5 @@
 import { ProjectPicker } from '../features/projects/ProjectPicker';
+import { UsageSummary } from '../features/usage/UsageSummary';
 import { WorkItemList } from '../features/work-items/WorkItemList';
 import { WorkItemScreen } from '../features/work-items/WorkItemScreen';
 import { useWorkspace } from './useWorkspace';
@@ -27,6 +28,7 @@ export function App() {
             toggleForm={() => state.toggleForm('project')}
             register={state.register}
           />
+          {state.project && <UsageSummary key={state.project.id} scope="projects" id={state.project.id} busy={busy} />}
           {state.project && <WorkItemList
             items={state.items}
             filter={state.filter}

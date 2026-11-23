@@ -1,14 +1,16 @@
 from collections.abc import Callable
 
 from harness.agents.harness import AgentHarness, AgentTurn
+from harness.persistence.usage import UsageRepository
 from harness.runtime import model_settings
 
 from .terminal import Terminal
 
 
 class InteractiveAgent(AgentHarness):
-    def __init__(self, model: str, terminal: Terminal, show_graph: Callable[[], None]) -> None:
-        super().__init__(model, model_settings=model_settings(model))
+    def __init__(self, model: str, terminal: Terminal, show_graph: Callable[[], None], *,
+                 usage: UsageRepository | None = None) -> None:
+        super().__init__(model, model_settings=model_settings(model), usage=usage)
         self.terminal = terminal
         self.show_graph = show_graph
 

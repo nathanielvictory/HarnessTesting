@@ -48,7 +48,7 @@ class Implementation:
             prompt += f"\n\nReview feedback\n{feedback}"
         result = self.agents.run_turn(
             prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
-            progress=self.progress,
+            node_id=node.id, progress=self.progress,
         )
         node.commit_sha = self.repository.save_commit(worktree, commit_message)
         node.branch_ref = branch

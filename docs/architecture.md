@@ -16,6 +16,8 @@ A project identifies a registered repository and groups work items. Creating a w
 
 SQLAlchemy maps projects, work items, nodes, and edges to SQLite. The graph repository maps those records to the graph's Python objects and saves node state and transitions together. Agent-driven nodes can save their model, conversation, and node-specific data. Nodes can also save a branch ref and commit SHA. The API and MCP expose visible messages and graph history from this state.
 
+The shared agent runner records Pydantic AI Harness `SpendLimits` events in SQLite as model responses arrive. Each record belongs to a graph node. The browser shows totals for the selected work item and project, including tokens and an estimated cost at API rates. For Codex subscription runs, that estimate describes equivalent API usage. Recording starts with new agent turns and runs without a spend ceiling.
+
 ## Path implemented today
 
 The shipped path below is the baseline for dogfooding. The [first iteration design](product.md#first-iteration) calls for steering and approval inside each node, including implementation. The [automation design](product.md#as-automation-grows) covers independent agent review and human gates at the points where the developer needs to intervene.

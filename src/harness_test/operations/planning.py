@@ -24,7 +24,7 @@ class TechnicalPlanning:
         if node.conversation is None and data.get("previous_plan"):
             message = f"Previous plan\n{data['previous_plan']}\n\nRevision request\n{message}"
         prompt = f"Approved brief\n{brief}\n\nRequest\n{message}"
-        model = node.model or self.agents.model
+        model = self.agents.model
         with self.repository.inspection_checkout(data["base_commit"]) as checkout:
             result = self.agents.run_turn(
                 prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=checkout

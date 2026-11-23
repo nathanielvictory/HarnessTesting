@@ -18,7 +18,7 @@ class GoalAlignment:
         data = node.data or {}
         if node.conversation is None and data.get("previous_brief"):
             message = f"Previous brief\n{data['previous_brief']}\n\nRevision request\n{message}"
-        model = node.model or self.agents.model
+        model = self.agents.model
         result = self.agents.run_turn(message, profile=PROFILE, model=model, conversation=node.conversation)
         node.model = model
         node.conversation = result.conversation

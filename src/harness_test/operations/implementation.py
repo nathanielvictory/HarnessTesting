@@ -36,7 +36,7 @@ class Implementation:
         branch = node.branch_ref or branch_ref
         commit = node.commit_sha or base_commit
         worktree = self.repository.open_worktree(checkout_path, branch, commit)
-        model = node.model or self.agents.model
+        model = self.agents.model
         data = node.data or {}
         prompt = f"Approved brief\n{brief}\n\nApproved technical plan\n{plan}"
         if data.get("paused"):

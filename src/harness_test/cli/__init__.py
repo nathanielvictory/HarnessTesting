@@ -26,7 +26,7 @@ def main() -> int:
     database = Database(state_dir / "harness.sqlite3")
     try:
         database.initialize()
-        model = os.environ.get("HARNESS_MODEL", "openai-codex:gpt-6-luna")
+        model = os.environ.get("HARNESS_MODEL", "openai-codex:gpt-6.2-sol")
         Application(database, state_dir, model, Terminal()).run()
     except (Quit, KeyboardInterrupt):
         print("\nHarness closed. Saved work can be reopened from the project menu.")

@@ -20,7 +20,8 @@ The CLI entry point lives in `src/harness_test/cli/__init__.py`.
 
 Sign in with `codex login`, then run `uv run --locked harness`. Register a Git
 repository by its absolute path and open a work item. The default agent model is
-`openai-codex:gpt-6-luna`. Set `HARNESS_MODEL` to select another model.
+`openai-codex:gpt-6.2-sol` at medium reasoning effort. Set `HARNESS_MODEL` to
+select another model.
 
 During alignment and planning, use `/approve` to accept the displayed draft.
 `/graph` shows the saved graph and `/quit` closes the harness. During an agent

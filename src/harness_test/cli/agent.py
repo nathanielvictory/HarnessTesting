@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+
 from harness_test.agents.harness import AgentHarness, AgentTurn
 
 from .terminal import Terminal
@@ -7,7 +9,10 @@ from .terminal import Terminal
 
 class InteractiveAgent(AgentHarness):
     def __init__(self, model: str, terminal: Terminal, show_graph: Callable[[], None]) -> None:
-        super().__init__(model)
+        settings = None
+        if model.startswith("openai-codex:"):
+            settings = OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
+        super().__init__(model, model_settings=settings)
         self.terminal = terminal
         self.show_graph = show_graph
 

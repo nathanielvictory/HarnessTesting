@@ -1,6 +1,13 @@
 # Harness
 
-Local workflow harness for LLM-assisted software development.
+Local harness for LLM-assisted software development.
+
+## Project documentation
+
+- [Product](docs/product.md) describes the intended experience and dogfooding scenarios.
+- [Glossary](docs/glossary.md) defines the terms used across the product and code.
+- [Architecture](docs/architecture.md) describes the current implementation.
+- [Development](docs/development.md) covers repository organization and verification.
 
 ## Run locally
 

@@ -28,7 +28,7 @@ These definitions describe how we intend Harness to work as we start using it on
 
 **Implementation** — The agent makes the planned changes from the chosen Git baseline. The user can discuss findings and request adjustments across multiple turns before approving the result.
 
-**Code review** — Examines the code changes against the agreed brief and plan, and identifies anything that needs to change. A human initially reviews the changes during implementation. As the process matures, a dedicated code review node can automate this examination.
+**Code review** — Examines the code changes against the agreed brief, plan, and relevant project guidance. A human initially reviews the changes during implementation. As the process matures, a dedicated node can use an agent with a fresh conversation to review the result and send findings back to implementation.
 
 **Human review gate** — Asks a human operator to inspect a result or make a judgment before the graph advances. It can be used wherever a decision calls for human involvement, including accepting a change, requesting revisions, or revisiting an earlier decision.
 

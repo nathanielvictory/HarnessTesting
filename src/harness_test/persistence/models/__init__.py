@@ -4,6 +4,6 @@ from .base import Base
 from .edge import Edge
 from .node import Node, NodeAction
 from .project import Project
-from .work_item import WorkItem
+from .work_item import WorkItem, WorkItemStatus
 
-__all__ = ["Base", "Edge", "Node", "NodeAction", "Project", "WorkItem"]
+__all__ = ["Base", "Edge", "Node", "NodeAction", "Project", "WorkItem", "WorkItemStatus"]

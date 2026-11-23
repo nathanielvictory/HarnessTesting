@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from threading import Lock
@@ -32,6 +33,7 @@ class Harness:
             settings.model, model_settings=model_settings(settings.model)
         )
         self._item_locks: dict[int, Lock] = {}
+        self._activity: dict[int, tuple[str, list[str]]] = {}
         self._locks_guard = Lock()
 
     def projects(self) -> list[ProjectEntry]:
@@ -70,40 +72,86 @@ class Harness:
     def talk(self, item_id: int, message: str) -> dict[str, Any]:
         if not message.strip():
             raise ValueError("Enter a message.")
-        return self._advance(item_id, lambda work: work.talk(message.strip()))
+        return self._advance(item_id, "Preparing a reply", lambda work: work.talk(message.strip()))
 
     def approve(self, item_id: int) -> dict[str, Any]:
-        return self._advance(item_id, WorkSession.approve)
+        return self._advance(item_id, "Saving approval", WorkSession.approve)
 
     def implement(self, item_id: int) -> dict[str, Any]:
-        return self._advance(item_id, WorkSession.implement)
+        return self._advance(item_id, "Implementing the plan", WorkSession.implement)
 
     def review(
         self, item_id: int, decision: ReviewDecision, note: str = "", earlier_id: int | None = None,
     ) -> dict[str, Any]:
         if decision in (ReviewDecision.FEEDBACK, ReviewDecision.REVISE) and not note.strip():
             raise ValueError("Describe what should change.")
-        return self._advance(item_id, lambda work: work.review(decision, note.strip(), earlier_id=earlier_id))
+        return self._advance(
+            item_id, "Recording the review", lambda work: work.review(decision, note.strip(), earlier_id=earlier_id)
+        )
 
-    def _advance(self, item_id: int, operation: Callable[[WorkSession], Step]) -> dict[str, Any]:
+    def close_work_item(self, item_id: int) -> dict[str, Any]:
+        with self._item_operation(item_id, "Closing the work item"):
+            self.catalog.complete_work_item(item_id)
+            return self.inspect(item_id)
+
+    def activity(self, item_id: int) -> dict[str, Any] | None:
+        with self._locks_guard:
+            activity = self._activity.get(item_id)
+            if activity is None:
+                return None
+            label, tools = activity
+            return {"label": label, "tools": tools.copy()}
+
+    def repository_file(self, item_id: int, node_id: int, path: str) -> str:
+        project, _ = self.catalog.get_work_item(item_id)
+        graph = self.graphs.load(item_id)
+        node = graph.nodes.get(node_id)
+        if node is None:
+            raise LookupError("That step does not belong to this work item.")
+        revision = node.commit_sha or (node.data or {}).get("base_commit")
+        if revision is None and node.node_type == NodeType.GOAL_ALIGNMENT:
+            revision = next((
+                (graph.node(edge.to_node_id).data or {}).get("base_commit")
+                for edge in graph.history() if edge.from_node_id == node.id and edge.outcome == "approved"
+            ), None)
+        if revision is None:
+            raise LookupError("This step has no saved repository snapshot.")
+        return GitRepository(Path(project.repository_path)).read_text_file(revision, path)
+
+    @contextmanager
+    def _item_operation(self, item_id: int, label: str):
         with self._locks_guard:
             if item_id not in self._item_locks:
                 self._item_locks[item_id] = Lock()
             lock = self._item_locks[item_id]
-        if not lock.acquire(blocking=False):
-            raise WorkItemConflict("This work item is already running an operation.")
+            if not lock.acquire(blocking=False):
+                raise WorkItemConflict("This work item is already running an operation.")
+            tools: list[str] = []
+            self._activity[item_id] = (label, tools)
+
+        def report(tool: str) -> None:
+            with self._locks_guard:
+                tools.append(tool)
+                del tools[:-6]
+
         try:
+            yield report
+        finally:
+            with self._locks_guard:
+                del self._activity[item_id]
+                lock.release()
+
+    def _advance(self, item_id: int, label: str, operation: Callable[[WorkSession], Step]) -> dict[str, Any]:
+        with self._item_operation(item_id, label) as progress:
             project, item = self.catalog.get_work_item(item_id)
             if item.status is WorkItemStatus.COMPLETE:
                 raise WorkItemConflict("This work item is complete.")
             work = WorkSession(
                 item.id, self.graphs, GitRepository(Path(project.repository_path)), self.agents,
-                self.settings.state_dir / "worktrees", item.title,
+                self.settings.state_dir / "worktrees", item.title, progress=progress,
             )
             operation(work)
             return self.inspect(item_id)
-        finally:
-            lock.release()
 
 
 def _node_view(node: Node) -> dict[str, Any]:

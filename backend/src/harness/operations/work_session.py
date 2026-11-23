@@ -18,15 +18,16 @@ class WorkSession:
     """Application operations for one selected work item."""
 
     def __init__(self, item_id: int, store: GraphRepository, repository: GitRepository,
-                 agents: AgentHarness, worktrees: Path, title: str | None) -> None:
+                 agents: AgentHarness, worktrees: Path, title: str | None, *,
+                 progress: Callable[[str], None] | None = None) -> None:
         self.item_id = item_id
         self.store = store
         self.repository = repository
         self.worktrees = worktrees
         self.title = title or f"Work item {item_id}"
-        self.alignment = GoalAlignment(repository, agents)
-        self.planning = TechnicalPlanning(repository, agents)
-        self.implementation = Implementation(repository, agents)
+        self.alignment = GoalAlignment(repository, agents, progress=progress)
+        self.planning = TechnicalPlanning(repository, agents, progress=progress)
+        self.implementation = Implementation(repository, agents, progress=progress)
 
     def graph(self) -> Graph:
         return self.store.load(self.item_id)

@@ -5,6 +5,7 @@ This document describes the current implementation. See the [product description
 ## Entry points and application boundaries
 
 - The **browser** uses React and TypeScript. It calls the FastAPI endpoints through the Vite proxy. The frontend owns project and work item selection, conversation display, and review controls. The backend returns the work item's graph and current node.
+- While a browser request runs an agent turn, the browser polls for recent tool calls and shows them beside the conversation. Activity is held in memory for the active request. Repository links in agent Markdown open files from the step's saved Git snapshot.
 - **FastAPI and MCP** call the same [application service](../backend/src/harness/application.py) for catalog and work item operations. MCP exposes those operations over Streamable HTTP. The service permits one mutation per work item at a time within a server process.
 - The **CLI** runs an interactive session and shares the catalog, graph repository, and work item operations with the server. It has its own terminal interaction and agent cancellation handling.
 - [WorkSession](../backend/src/harness/operations/work_session.py) coordinates the operations for one work item. It chooses the next node for a given operation. The [traverser](../backend/src/harness/graph/traverser.py) invokes the operation and records the outcome and any resulting edge.
@@ -22,6 +23,8 @@ The shipped path below is the baseline for dogfooding. The [first iteration desi
 Creating a work item records the repository's current commit on the goal alignment node as the Git baseline. Goal alignment and technical planning each collect a conversation and draft. Approving the brief advances to technical planning with the same baseline. Approving the plan advances to implementation, which starts its branch from that baseline. Once implementation returns a result, Harness opens a human review node.
 
 At implementation review, the developer can accept the result, send feedback back to the same implementation node, revise the plan, or review an earlier brief or plan. Feedback resumes the saved implementation conversation. Revising an earlier decision creates a new node seeded with the previous approved text and the revision note. A subsequent implementation starts from the earlier baseline on a new branch. The graph retains the earlier path. Accepting implementation marks the work item complete and leaves the branch available for the developer to integrate.
+
+The browser and MCP can also mark a work item complete at any step. Its conversation and graph stay available in the completed list without an implementation acceptance decision.
 
 The path is defined in Python and a plan leads to one implementation node at a time.
 

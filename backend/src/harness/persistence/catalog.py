@@ -69,3 +69,10 @@ class Catalog:
             session.add(item)
             session.flush()
             return WorkItemEntry(item.id, item.title, item.status)
+
+    def complete_work_item(self, item_id: int) -> None:
+        with self.database.session() as session:
+            item = session.get(WorkItem, item_id)
+            if item is None:
+                raise LookupError(f"Work item {item_id} does not exist")
+            item.status = WorkItemStatus.COMPLETE

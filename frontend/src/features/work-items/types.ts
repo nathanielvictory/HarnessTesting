@@ -52,8 +52,14 @@ export interface WorkItemDetail {
 
 export type ReviewDecision = 'accept' | 'feedback' | 'revise' | 'review_earlier' | 'return';
 
+export interface WorkItemActivity {
+  label: string;
+  tools: string[];
+}
+
 export type WorkItemCommand =
   | { type: 'messages'; message: string }
   | { type: 'approve' }
   | { type: 'implement' }
+  | { type: 'close' }
   | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null };

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 from harness.agents.harness import AgentHarness, AgentProfile
@@ -17,9 +18,11 @@ PROFILE = AgentProfile(
 
 
 class Implementation:
-    def __init__(self, repository: GitRepository, agents: AgentHarness) -> None:
+    def __init__(self, repository: GitRepository, agents: AgentHarness, *,
+                 progress: Callable[[str], None] | None = None) -> None:
         self.repository = repository
         self.agents = agents
+        self.progress = progress
 
     def run(
         self,
@@ -44,7 +47,8 @@ class Implementation:
         elif feedback:
             prompt += f"\n\nReview feedback\n{feedback}"
         result = self.agents.run_turn(
-            prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree
+            prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
+            progress=self.progress,
         )
         node.commit_sha = self.repository.save_commit(worktree, commit_message)
         node.branch_ref = branch

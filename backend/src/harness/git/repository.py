@@ -68,6 +68,25 @@ class GitRepository:
         return _git(self.path, "diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv",
                     self.commit_sha(base), self.commit_sha(result), "--")
 
+    def read_text_file(self, revision: str, path: str) -> str:
+        parts = path.split("/")
+        if "\\" in path or any(ord(char) < 32 for char in path) or any(
+            part.casefold() in {"", ".", "..", ".git", ".env"} or part.casefold().startswith(".env.")
+            for part in parts
+        ):
+            raise ValueError("Choose a repository-relative file path.")
+        spec = f"{self.commit_sha(revision)}:{path}"
+        try:
+            size = int(_git(self.path, "cat-file", "-s", spec))
+            if size > 256 * 1024:
+                raise ValueError("This file is too large to preview.")
+            content = _git(self.path, "cat-file", "blob", spec)
+        except GitError as exc:
+            raise LookupError("This file is unavailable in the saved commit.") from exc
+        if "\0" in content or any(0xDC80 <= ord(char) <= 0xDCFF for char in content):
+            raise ValueError("Only UTF-8 text files can be previewed.")
+        return content
+
     def merge(self, worktree: Path, revision: str) -> str:
         _git(worktree, "merge", "--no-edit", "--", self.commit_sha(revision))
         return _git(worktree, "rev-parse", "HEAD").strip()

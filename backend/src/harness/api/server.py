@@ -1,9 +1,10 @@
 import os
 from contextlib import asynccontextmanager
+from html import escape
 
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from pydantic_ai.exceptions import AgentRunError, UserError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -98,6 +99,34 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
     @app.get("/api/work-items/{item_id}")
     def inspect(item_id: int) -> dict:
         return harness.inspect(item_id)
+
+    @app.get("/api/work-items/{item_id}/activity")
+    def activity(item_id: int) -> dict | None:
+        return harness.activity(item_id)
+
+    @app.get("/api/work-items/{item_id}/nodes/{node_id}/file", response_class=HTMLResponse)
+    def repository_file(item_id: int, node_id: int, path: str = Query(max_length=4096)) -> HTMLResponse:
+        content = harness.repository_file(item_id, node_id, path)
+        filename = escape(path)
+        lines = "".join(
+            f'<span id="L{number}"><a href="#L{number}">{number}</a>{escape(line)}\n</span>'
+            for number, line in enumerate(content.splitlines(), 1)
+        )
+        return HTMLResponse(
+            f'''<!doctype html><html lang="en"><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>{filename}</title><style>
+            body {{ font: 1rem system-ui, sans-serif; margin: 1.5rem; color: #182334; }}
+            h1 {{ font-size: 1.2rem; overflow-wrap: anywhere; }} pre {{ overflow: auto; line-height: 1.5; }}
+            span {{ display: block; }} span:target {{ background: #e8f0fa; }}
+            a {{ display: inline-block; width: 5ch; margin-right: 1ch; color: #54657b; text-align: right; }}
+            </style><h1>{filename}</h1><pre>{lines}</pre></html>''',
+            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"},
+        )
+
+    @app.post("/api/work-items/{item_id}/close")
+    def close_work_item(item_id: int) -> dict:
+        return harness.close_work_item(item_id)
 
     @app.post("/api/work-items/{item_id}/messages")
     def talk(item_id: int, body: MessageRequest) -> dict:

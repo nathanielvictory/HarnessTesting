@@ -14,6 +14,7 @@ class InteractiveAgent(AgentHarness):
 
     def run_turn(self, prompt: str, **kwargs) -> AgentTurn:
         parent = super().run_turn
+        kwargs.pop("progress", None)
         return self.terminal.wait_for_agent(
             lambda progress, token: parent(prompt, **kwargs, progress=progress, cancellation_token=token),
             self.show_graph,

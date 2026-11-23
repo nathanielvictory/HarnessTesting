@@ -41,9 +41,9 @@ export function App() {
         </aside>
         <main className="main">
           {state.error && <p className="notice error" role="alert">{state.error}</p>}
-          {state.busy && <p className="notice" role="status">{state.busy}</p>}
+          {state.busy && !state.activity && <p className="notice" role="status">{state.busy}</p>}
           {state.detail
-            ? <WorkItemScreen key={state.detail.work_item.id} detail={state.detail} busy={busy} perform={state.perform} />
+            ? <WorkItemScreen key={state.detail.work_item.id} detail={state.detail} busy={busy} activity={state.activity} perform={state.perform} />
             : <div className="empty">
               <h2>{state.project ? 'Open a work item' : 'Register a repository'}</h2>
               <p>{state.project

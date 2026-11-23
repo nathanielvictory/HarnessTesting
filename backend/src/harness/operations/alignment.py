@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
 from harness.git.repository import GitRepository
 from harness.graph.state import Node
@@ -16,9 +18,11 @@ PROFILE = AgentProfile(
 
 
 class GoalAlignment:
-    def __init__(self, repository: GitRepository, agents: AgentHarness) -> None:
+    def __init__(self, repository: GitRepository, agents: AgentHarness, *,
+                 progress: Callable[[str], None] | None = None) -> None:
         self.repository = repository
         self.agents = agents
+        self.progress = progress
 
     def talk(self, node: Node, message: str) -> Outcome:
         data = node.data or {}
@@ -28,7 +32,8 @@ class GoalAlignment:
         model = self.agents.model
         with self.repository.inspection_checkout(base) as checkout:
             result = self.agents.run_turn(
-                message, profile=PROFILE, model=model, conversation=node.conversation, worktree=checkout
+                message, profile=PROFILE, model=model, conversation=node.conversation, worktree=checkout,
+                progress=self.progress,
             )
         node.model = model
         node.conversation = result.conversation

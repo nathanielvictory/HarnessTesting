@@ -40,6 +40,11 @@ def build_mcp(harness: Harness) -> MCPServer:
         return await run_in_threadpool(harness.create_work_item, project_id, title)
 
     @server.tool()
+    async def close_work_item(item_id: int) -> dict[str, Any]:
+        """Move a work item to Complete and preserve its history, without recording review acceptance."""
+        return await run_in_threadpool(harness.close_work_item, item_id)
+
+    @server.tool()
     async def send_message(item_id: int, message: str) -> dict[str, Any]:
         """Send a turn to the current goal alignment or planning conversation."""
         return await run_in_threadpool(harness.talk, item_id, message)

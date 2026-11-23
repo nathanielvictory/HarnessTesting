@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { Activity } from '../Activity';
 import { nodeLabel } from '../labels';
+import { MessageMarkdown } from '../MessageMarkdown';
 import type { ReviewDecision, WorkNode } from '../types';
 import type { StepProps } from './types';
 
@@ -20,7 +22,7 @@ interface Props extends StepProps {
   earlier: { id: number; label: string }[];
 }
 
-export function ReviewStep({ target, node, done, busy, perform, earlier }: Props) {
+export function ReviewStep({ target, node, done, busy, activity, links, perform, earlier }: Props) {
   const [decision, setDecision] = useState<ReviewDecision | ''>('');
   const [note, setNote] = useState('');
   const [earlierId, setEarlierId] = useState(earlier[0]?.id ?? null);
@@ -28,15 +30,22 @@ export function ReviewStep({ target, node, done, busy, perform, earlier }: Props
     ? implementationChoices.filter(choice => choice.value !== 'review_earlier' || earlier.length > 0)
     : earlierChoices;
   const needsNote = decision === 'feedback' || decision === 'revise';
+  const summary = target.data?.summary || target.data?.approved;
 
   return <>
     <h3>Review {nodeLabel(target).toLowerCase()}</h3>
+    <p className="step-description">
+      {target.node_type === 'implementation'
+        ? 'Check the saved changes against the brief. Accept when they meet the goal, send feedback for another implementation turn, or revisit the brief or plan if the direction needs to change.'
+        : 'Read the decision that guided implementation. Revise it to try again from the original snapshot, or return to the implementation review.'}
+    </p>
     {target.branch_ref && <dl className="revision">
       <div><dt>Branch</dt><dd><code>{target.branch_ref.replace(/^refs\/heads\//, '')}</code></dd></div>
       <div><dt>Commit</dt><dd><code>{node.data?.last_decision?.reviewed_commit_sha || target.commit_sha}</code></dd></div>
     </dl>}
-    <p className="prose">{target.data?.summary || target.data?.approved}</p>
-    {!done && <form className="stack" onSubmit={event => {
+    {summary && <MessageMarkdown text={summary} links={links} nodeId={target.id} />}
+    <Activity activity={activity} />
+    {!done && !activity && <form className="stack" onSubmit={event => {
       event.preventDefault();
       if (decision) perform({ type: 'review', decision, note, earlier_id: decision === 'review_earlier' ? earlierId : null });
     }}>

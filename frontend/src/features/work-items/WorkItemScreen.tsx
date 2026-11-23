@@ -1,29 +1,36 @@
 import { useState } from 'react';
+import { Activity } from './Activity';
 import { Conversation } from './Conversation';
 import { GraphHistory } from './GraphHistory';
 import { nodeLabel, workItemTitle } from './labels';
+import type { RepositoryLinks } from './MessageMarkdown';
 import { DiscussionStep } from './steps/DiscussionStep';
 import { ImplementationStep } from './steps/ImplementationStep';
 import { ReviewStep } from './steps/ReviewStep';
-import type { WorkItemCommand, WorkItemDetail } from './types';
+import type { WorkItemActivity, WorkItemCommand, WorkItemDetail } from './types';
 import './work-item.css';
 
 interface Props {
   detail: WorkItemDetail;
   busy: boolean;
+  activity: WorkItemActivity | null;
   perform: (command: WorkItemCommand) => void;
 }
 
-export function WorkItemScreen({ detail, busy, perform }: Props) {
+export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
   const [historyId, setHistoryId] = useState<number | null>(null);
   const current = detail.nodes.find(node => node.id === detail.current_node_id);
   const historical = detail.nodes.find(node => node.id === historyId);
   const done = detail.work_item.status === 'complete';
+  const links = { itemId: detail.work_item.id, repositoryPath: detail.project.repository_path };
 
   return <>
     <div className="item-heading">
-      <h2>{workItemTitle(detail.work_item)}</h2>
-      <p className="muted">{done ? 'Complete' : nodeLabel(current)}</p>
+      <div>
+        <h2>{workItemTitle(detail.work_item)}</h2>
+        <p className="muted">{done ? 'Complete' : nodeLabel(current)}</p>
+      </div>
+      {!done && <button disabled={busy} onClick={() => perform({ type: 'close' })}>Mark complete</button>}
     </div>
     <div className="work-grid">
       <section className="panel">
@@ -33,20 +40,21 @@ export function WorkItemScreen({ detail, busy, perform }: Props) {
               <h3>{nodeLabel(historical)}</h3>
               <button onClick={() => setHistoryId(null)}>Back to current step</button>
             </div>
-            <Conversation node={historical} />
+            <Conversation node={historical} links={links} />
+            <Activity activity={activity} />
           </>
-          : <CurrentStep key={current?.id} detail={detail} busy={busy} perform={perform} />}
+          : <CurrentStep key={current?.id} detail={detail} busy={busy} activity={activity} perform={perform} links={links} />}
       </section>
       <GraphHistory detail={detail} selectNode={setHistoryId} />
     </div>
   </>;
 }
 
-function CurrentStep({ detail, busy, perform }: Props) {
+function CurrentStep({ detail, busy, activity, perform, links }: Props & { links: RepositoryLinks }) {
   const node = detail.nodes.find(node => node.id === detail.current_node_id);
   if (!node) return null;
   const done = detail.work_item.status === 'complete';
-  const step = { node, done, busy, perform };
+  const step = { node, done, busy, activity, perform, links };
 
   const review = detail.review;
   if (review) {
@@ -67,7 +75,8 @@ function CurrentStep({ detail, busy, perform }: Props) {
     default:
       return <>
         <h3>{nodeLabel(node)}</h3>
-        <Conversation node={node} />
+        <Conversation node={node} links={links} />
+        <Activity activity={activity} />
       </>;
   }
 }

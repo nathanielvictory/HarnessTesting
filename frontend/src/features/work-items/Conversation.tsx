@@ -10,7 +10,7 @@ export function Conversation({ node, links }: { node: WorkNode; links: Repositor
   return <ol className="messages" aria-label="Conversation">
     {node.messages.map(({ role, text }, index) => <li key={index} className={role}>
       <strong>{role === 'user' ? 'You' : 'Agent'}</strong>
-      {role === 'user' ? <p className="prose">{text}</p> : <MessageMarkdown text={text} links={links} nodeId={node.id} />}
+      <MessageMarkdown text={text} links={links} nodeId={node.id} />
     </li>)}
   </ol>;
 }

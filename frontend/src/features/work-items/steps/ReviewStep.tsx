@@ -4,6 +4,7 @@ import { nodeLabel } from '../labels';
 import { MessageMarkdown } from '../MessageMarkdown';
 import type { ReviewDecision, WorkNode } from '../types';
 import type { StepProps } from './types';
+import { useNodeDraft } from './useNodeDraft';
 
 const implementationChoices: { value: ReviewDecision; label: string }[] = [
   { value: 'accept', label: 'Accept and complete' },
@@ -23,12 +24,12 @@ interface Props extends StepProps {
 }
 
 export function ReviewStep({ target, node, done, busy, activity, links, perform, earlier }: Props) {
-  const [decision, setDecision] = useState<ReviewDecision | ''>('');
-  const [note, setNote] = useState('');
-  const [earlierId, setEarlierId] = useState(earlier[0]?.id ?? null);
+  const [{ text: note, reviewDecision }, saveDraft] = useNodeDraft(node.id);
   const choices = target.node_type === 'implementation'
     ? implementationChoices.filter(choice => choice.value !== 'review_earlier' || earlier.length > 0)
     : earlierChoices;
+  const [decision, setDecision] = useState<ReviewDecision | ''>(() => choices.find(choice => choice.value === reviewDecision)?.value ?? '');
+  const [earlierId, setEarlierId] = useState(earlier[0]?.id ?? null);
   const needsNote = decision === 'feedback' || decision === 'revise';
   const summary = target.data?.summary || target.data?.approved;
 
@@ -47,7 +48,12 @@ export function ReviewStep({ target, node, done, busy, activity, links, perform,
     <Activity activity={activity} />
     {!done && !activity && <form className="stack" onSubmit={event => {
       event.preventDefault();
-      if (decision) perform({ type: 'review', decision, note, earlier_id: decision === 'review_earlier' ? earlierId : null });
+      if (decision) {
+        perform(
+          { type: 'review', decision, note, earlier_id: decision === 'review_earlier' ? earlierId : null },
+          () => saveDraft({ text: '' }),
+        );
+      }
     }}>
       <label>Decision
         <select value={decision} onChange={event => {
@@ -59,7 +65,7 @@ export function ReviewStep({ target, node, done, busy, activity, links, perform,
         </select>
       </label>
       {needsNote && <label>What should change?
-        <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} required />
+        <textarea value={note} onChange={event => saveDraft({ text: event.target.value, reviewDecision: decision })} rows={3} required />
       </label>}
       {decision === 'review_earlier' && <label>Earlier step
         <select value={earlierId ?? ''} onChange={event => setEarlierId(Number(event.target.value))} required>

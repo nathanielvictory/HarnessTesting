@@ -10,7 +10,6 @@
 .messages > li { border: 1px solid var(--line); border-radius: .45rem; padding: .6rem .75rem; }
 .messages .user { background: #eef4fb; }
 .messages > li > strong { font-size: .875rem; }
-.prose { white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdown { overflow-wrap: anywhere; }
 .markdown > * + * { margin-top: .65rem; }
 .markdown a { color: var(--accent); text-underline-offset: .15em; }

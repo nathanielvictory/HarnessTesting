@@ -1,11 +1,11 @@
-import { useState } from 'react';
 import { Activity } from '../Activity';
 import { Conversation } from '../Conversation';
 import { nodeLabel } from '../labels';
 import type { StepProps } from './types';
+import { useNodeDraft } from './useNodeDraft';
 
 export function DiscussionStep({ node, done, busy, activity, links, perform, alignment }: StepProps & { alignment: boolean }) {
-  const [message, setMessage] = useState('');
+  const [{ text: message }, saveDraft] = useNodeDraft(node.id);
 
   return <>
     <h3>{nodeLabel(node)}</h3>
@@ -20,11 +20,10 @@ export function DiscussionStep({ node, done, busy, activity, links, perform, ali
       <form className="stack" onSubmit={event => {
         event.preventDefault();
         if (message.trim()) {
-          perform({ type: 'messages', message });
-          setMessage('');
+          perform({ type: 'messages', message }, () => saveDraft({ text: '' }));
         }
       }}>
-        <label>Message<textarea value={message} onChange={event => setMessage(event.target.value)} rows={3} required /></label>
+        <label>Message<textarea value={message} onChange={event => saveDraft({ text: event.target.value })} rows={3} required /></label>
         <div><button className="primary" disabled={busy || !message.trim()}>Send</button></div>
       </form>
       {node.data?.draft && <div className="approval">

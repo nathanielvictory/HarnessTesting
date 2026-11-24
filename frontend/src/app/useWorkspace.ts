@@ -124,7 +124,7 @@ export function useWorkspace() {
     return run('Opening work item', async () => setDetail(await getWorkItem(id)));
   }
 
-  function perform(command: WorkItemCommand) {
+  function perform(command: WorkItemCommand, onSubmitted?: () => void) {
     if (!detail) return;
     const id = detail.work_item.id;
     function execute(step: WorkItemCommand, current: WorkItemDetail) {
@@ -136,6 +136,7 @@ export function useWorkspace() {
     return run(commandLabel(command, initial), async () => {
       try {
         let updated = await execute(command, initial);
+        onSubmitted?.();
         setDetail(updated);
         if (command.type === 'approve' || command.type === 'review') {
           const next = followUpCommand(updated);

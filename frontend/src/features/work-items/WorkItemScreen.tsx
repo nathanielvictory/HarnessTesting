@@ -8,20 +8,22 @@ import type { RepositoryLinks } from './MessageMarkdown';
 import { DiscussionStep } from './steps/DiscussionStep';
 import { ImplementationStep } from './steps/ImplementationStep';
 import { ReviewStep } from './steps/ReviewStep';
-import type { WorkItemActivity, WorkItemCommand, WorkItemDetail } from './types';
+import type { PerformCommand } from './steps/types';
+import type { WorkItemActivity, WorkItemDetail } from './types';
 import './work-item.css';
 
 interface Props {
   detail: WorkItemDetail;
   busy: boolean;
   activity: WorkItemActivity | null;
-  perform: (command: WorkItemCommand) => void;
+  perform: PerformCommand;
 }
 
 export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
   const [historyId, setHistoryId] = useState<number | null>(null);
   const current = detail.nodes.find(node => node.id === detail.current_node_id);
   const historical = detail.nodes.find(node => node.id === historyId);
+  const showingHistory = historical && historical.id !== current?.id;
   const done = detail.work_item.status === 'complete';
   const links = { itemId: detail.work_item.id, repositoryPath: detail.project.repository_path };
 
@@ -36,16 +38,17 @@ export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
     <UsageSummary scope="work-items" id={detail.work_item.id} busy={busy} />
     <div className="work-grid">
       <section className="panel">
-        {historical && historical.id !== current?.id
-          ? <>
-            <div className="panel-heading">
-              <h3>{nodeLabel(historical)}</h3>
-              <button onClick={() => setHistoryId(null)}>Back to current step</button>
-            </div>
-            <Conversation node={historical} links={links} />
-            <Activity activity={activity} />
-          </>
-          : <CurrentStep key={current?.id} detail={detail} busy={busy} activity={activity} perform={perform} links={links} />}
+        {showingHistory && <>
+          <div className="panel-heading">
+            <h3>{nodeLabel(historical)}</h3>
+            <button onClick={() => setHistoryId(null)}>Back to current step</button>
+          </div>
+          <Conversation node={historical} links={links} />
+          <Activity activity={activity} />
+        </>}
+        <div hidden={showingHistory}>
+          <CurrentStep key={current?.id} detail={detail} busy={busy} activity={activity} perform={perform} links={links} />
+        </div>
       </section>
       <GraphHistory detail={detail} selectNode={setHistoryId} />
     </div>

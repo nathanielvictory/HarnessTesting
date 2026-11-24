@@ -10,6 +10,8 @@ PROFILE = AgentProfile(
     instructions=(
         "Propose a concise technical plan for the approved brief. Inspect the repository as needed. "
         "Identify the affected components, implementation steps, and verification. "
+        "If the work would benefit from separately reviewed pieces, list their briefs and "
+        "name any prerequisites explicitly so the developer can delegate them when approving. "
         "If the user asks for changes, reply with the complete revised plan."
     ),
     file_tools=READ_ONLY_FILE_TOOLS,

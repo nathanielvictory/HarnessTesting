@@ -14,7 +14,11 @@ export interface WorkNode {
   model: string | null;
   branch_ref: string | null;
   commit_sha: string | null;
+  status: 'pending' | 'done' | 'superseded';
+  scope_id: number;
+  scope_brief: string | null;
   data: {
+    scope_brief?: string;
     draft?: string;
     approved?: string;
     summary?: string;
@@ -48,6 +52,10 @@ export interface WorkItemDetail {
   work_item: WorkItem;
   entry_node_id: number | null;
   current_node_id: number | null;
+  ready_node_ids: number[];
+  blocked: Record<number, { node_id: number; reason: string }[]>;
+  result_commit: string | null;
+  reviews: Record<number, Review>;
   nodes: WorkNode[];
   transitions: Transition[];
   review: Review | null;
@@ -67,9 +75,17 @@ export interface ImplementationDiff {
   truncated: boolean;
 }
 
-export type WorkItemCommand =
+export interface ScopedWork {
+  brief: string;
+  depends_on: number[];
+}
+
+export type WorkItemCommand = { node_id?: number } & (
   | { type: 'messages'; message: string }
-  | { type: 'approve' }
+  | { type: 'approve'; pieces?: ScopedWork[] }
   | { type: 'implement' }
   | { type: 'close' }
-  | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null };
+  | { type: 'discover'; pieces: ScopedWork[] }
+  | { type: 'reopen'; node_id: number; note: string }
+  | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null }
+);

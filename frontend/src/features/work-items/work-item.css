@@ -64,6 +64,12 @@
 .history-step[aria-current]::before { background: var(--accent); border-color: var(--accent); }
 .history-step span { color: var(--muted); font-size: .8rem; }
 .history-toggle { display: none; }
+.ready-step { padding: .4rem .85rem; border-bottom: 1px solid var(--line); }
+.frontier-sidebar { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.history .frontier-sidebar li { padding-left: 0; }
+.history .frontier-sidebar li::before { content: none; }
+.frontier-sidebar summary { cursor: pointer; }
+.frontier-sidebar fieldset { min-width: 0; }
 
 @media (max-width: 48rem) {
   .work-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }

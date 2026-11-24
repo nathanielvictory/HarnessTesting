@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { nodeLabel } from './labels';
 import type { WorkItemDetail } from './types';
 
@@ -6,9 +7,10 @@ interface Props {
   selectedId?: number;
   expanded: boolean;
   selectNode: (id: number) => void;
+  children?: ReactNode;
 }
 
-export function GraphHistory({ detail, selectedId, expanded, selectNode }: Props) {
+export function GraphHistory({ detail, selectedId, expanded, selectNode, children }: Props) {
   const nodes = new Map(detail.nodes.map(node => [node.id, node]));
   const entryId = detail.entry_node_id;
   const selectedVisit = detail.transitions.map(edge => edge.to_node_id).lastIndexOf(selectedId ?? -1);
@@ -31,5 +33,6 @@ export function GraphHistory({ detail, selectedId, expanded, selectNode }: Props
         </button>
       </li>)}
     </ol>
+    {children}
   </aside>;
 }

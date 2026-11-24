@@ -8,9 +8,9 @@ import { StepPane } from './StepPane';
 import { useNodeDraft } from './useNodeDraft';
 
 const implementationChoices: { value: ReviewDecision; label: string }[] = [
-  { value: 'accept', label: 'Accept and complete' },
+  { value: 'accept', label: 'Accept this piece' },
   { value: 'feedback', label: 'Send feedback to the same worker' },
-  { value: 'revise', label: 'Revise the plan and retry' },
+  { value: 'revise', label: 'Reopen implementation and retry' },
   { value: 'review_earlier', label: 'Review an earlier step' },
 ];
 

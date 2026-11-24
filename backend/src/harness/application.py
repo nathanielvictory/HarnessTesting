@@ -10,7 +10,7 @@ from .git.repository import GitRepository
 from .graph.state import Graph, Node
 from .graph.traverser import Step
 from .operations.review import ReviewDecision
-from .operations.work_session import WorkSession
+from .operations.work_session import ScopedWork, WorkSession
 from .persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from .persistence.database import Database
 from .persistence.graph.repository import GraphRepository
@@ -68,35 +68,49 @@ class Harness:
     def inspect(self, item_id: int) -> dict[str, Any]:
         project, item = self.catalog.get_work_item(item_id)
         graph = self.graphs.load(item_id)
-        current = graph.current_node()
+        ready = graph.current_nodes() if item.status is not WorkItemStatus.COMPLETE else []
+        current = ready[0] if ready else None
+        entry = graph.nodes.get(graph.entry_node_id)
         return {
             "project": asdict(project),
             "work_item": asdict(item),
             "entry_node_id": graph.entry_node_id,
             "current_node_id": current.id if current else None,
-            "nodes": [_node_view(node) for node in sorted(graph.nodes.values(), key=lambda node: node.id)],
+            "ready_node_ids": [node.id for node in ready],
+            "blocked": {node.id: reasons for node in graph.nodes.values() if node.status == 'pending'
+                        and (reasons := graph.blockers(node))},
+            "result_commit": entry.workflow.get('result_commit') if entry else None,
+            "nodes": [_node_view(graph, node) for node in sorted(graph.nodes.values(), key=lambda node: node.id)],
             "transitions": [asdict(edge) for edge in graph.history()],
             "review": _review_view(graph, current),
+            "reviews": {node.id: _review_view(graph, node) for node in ready if node.node_type == NodeType.HUMAN_REVIEW},
         }
 
-    def talk(self, item_id: int, message: str) -> dict[str, Any]:
+    def talk(self, item_id: int, message: str, node_id: int | None = None) -> dict[str, Any]:
         if not message.strip():
             raise ValueError("Enter a message.")
-        return self._advance(item_id, "Preparing a reply", lambda work: work.talk(message.strip()))
+        return self._advance(item_id, "Preparing a reply", lambda work: work.talk(message.strip(), node_id))
 
-    def approve(self, item_id: int) -> dict[str, Any]:
-        return self._advance(item_id, "Saving approval", WorkSession.approve)
+    def approve(self, item_id: int, node_id: int | None = None, pieces: list[ScopedWork] | None = None) -> dict[str, Any]:
+        return self._advance(item_id, "Saving approval", lambda work: work.approve(node_id, pieces))
 
-    def implement(self, item_id: int) -> dict[str, Any]:
-        return self._advance(item_id, "Implementing the plan", WorkSession.implement)
+    def implement(self, item_id: int, node_id: int | None = None) -> dict[str, Any]:
+        return self._advance(item_id, "Implementing the plan", lambda work: work.implement(node_id))
+
+    def discover(self, item_id: int, pieces: list[ScopedWork], node_id: int | None = None) -> dict[str, Any]:
+        return self._advance(item_id, "Adding prerequisites", lambda work: work.discover(pieces, node_id))
+
+    def reopen(self, item_id: int, node_id: int, note: str) -> dict[str, Any]:
+        return self._advance(item_id, "Reopening the selected step", lambda work: work.reopen(node_id, note))
 
     def review(
         self, item_id: int, decision: ReviewDecision, note: str = "", earlier_id: int | None = None,
+        node_id: int | None = None,
     ) -> dict[str, Any]:
         if decision in (ReviewDecision.FEEDBACK, ReviewDecision.REVISE) and not note.strip():
             raise ValueError("Describe what should change.")
         return self._advance(
-            item_id, "Recording the review", lambda work: work.review(decision, note.strip(), earlier_id=earlier_id)
+            item_id, "Recording the review", lambda work: work.review(decision, note.strip(), earlier_id=earlier_id, node_id=node_id)
         )
 
     def close_work_item(self, item_id: int) -> dict[str, Any]:
@@ -185,7 +199,7 @@ class Harness:
                 del self._activity[item_id]
                 lock.release()
 
-    def _advance(self, item_id: int, label: str, operation: Callable[[WorkSession], Step]) -> dict[str, Any]:
+    def _advance(self, item_id: int, label: str, operation: Callable[[WorkSession], Step | None]) -> dict[str, Any]:
         with self._item_operation(item_id, label) as progress:
             project, item = self.catalog.get_work_item(item_id)
             if item.status is WorkItemStatus.COMPLETE:
@@ -198,7 +212,7 @@ class Harness:
             return self.inspect(item_id)
 
 
-def _node_view(node: Node) -> dict[str, Any]:
+def _node_view(graph: Graph, node: Node) -> dict[str, Any]:
     messages = []
     for message in (node.conversation or {}).get("messages", []):
         for part in message.get("parts", []):
@@ -208,7 +222,9 @@ def _node_view(node: Node) -> dict[str, Any]:
     return {
         "id": node.id, "node_type": node.node_type, "model": node.model,
         "branch_ref": node.branch_ref, "commit_sha": node.commit_sha,
-        "data": node.data, "messages": messages,
+        "data": node.data, "messages": messages, "status": node.status,
+        "scope_id": graph.scope(node),
+        "scope_brief": (graph.node(graph.scope(node)).data or {}).get('scope_brief'),
     }
 
 

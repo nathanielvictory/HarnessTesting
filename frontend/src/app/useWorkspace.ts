@@ -157,7 +157,7 @@ export function useWorkspace() {
         onSubmitted?.();
         setDetail(updated);
         if (command.type === 'approve' || command.type === 'review') {
-          const next = followUpCommand(updated);
+          const next = followUpCommand(initial, updated, command.node_id ?? initial.current_node_id);
           if (next) {
             updated = await execute(next, updated);
             setDetail(updated);
@@ -185,20 +185,25 @@ export function useWorkspace() {
 function commandLabel(command: WorkItemCommand, detail: WorkItemDetail) {
   switch (command.type) {
     case 'messages':
-      return detail.nodes.find(node => node.id === detail.current_node_id)?.node_type === 'technical_planning'
+      return detail.nodes.find(node => node.id === (command.node_id ?? detail.current_node_id))?.node_type === 'technical_planning'
         ? 'Preparing the technical plan' : 'Preparing an alignment reply';
     case 'approve': return 'Saving approval';
     case 'implement': return 'Implementing the plan';
     case 'review': return 'Recording the review';
-    case 'close': return 'Completing the work item';
+    case 'close': return 'Closing the work item';
+    case 'discover': return 'Adding scoped prerequisites';
+    case 'reopen': return 'Reopening the step';
   }
 }
 
 // Preserve the existing automatic follow-up after a browser approval or review.
-function followUpCommand(detail: WorkItemDetail): WorkItemCommand | undefined {
+function followUpCommand(before: WorkItemDetail, detail: WorkItemDetail, source: number | null): WorkItemCommand | undefined {
+  if (before.ready_node_ids.length !== 1 || detail.ready_node_ids.length !== 1) return;
   const current = detail.nodes.find(node => node.id === detail.current_node_id);
-  if (current?.node_type === 'implementation') return { type: 'implement' };
+  if (!current || !detail.transitions.slice(before.transitions.length).some(edge =>
+    edge.from_node_id === source && edge.to_node_id === current.id && edge.outcome !== 'delegated')) return;
+  if (current.node_type === 'implementation') return { type: 'implement', node_id: current.id };
   if (current?.node_type === 'technical_planning' && !current.messages.length) {
-    return { type: 'messages', message: current.data?.revision_note || 'Draft the technical plan.' };
+    return { type: 'messages', node_id: current.id, message: current.data?.revision_note || 'Draft the technical plan.' };
   }
 }

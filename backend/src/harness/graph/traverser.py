@@ -1,14 +1,13 @@
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
-from typing import Any, Protocol
+from copy import deepcopy
+from dataclasses import dataclass, replace
+from typing import Any, Protocol, TypeVar
 
 from .state import Edge, Graph, Node
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """A node result with optional data for its outgoing transition."""
-
     name: str
     data: dict[str, Any] | None = None
     complete: bool = False
@@ -19,6 +18,8 @@ class NewNode:
     node_type: str
     data: dict[str, Any] | None = None
     branch_ref: str | None = None
+    commit_sha: str | None = None
+    conversation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -28,53 +29,58 @@ class Step:
     edge: Edge | None
 
 
+class Edit(Protocol):
+    graph: Graph
+
+    def add(self, target: NewNode) -> Node: ...
+    def transition(self, source: Node, target: Node, outcome: str, data: dict | None = None) -> Edge: ...
+    def finish(self, result: str) -> None: ...
+
+
+T = TypeVar('T')
+
+
 class GraphStore(Protocol):
     def load(self, work_item_id: int) -> Graph: ...
-
-    def save_step(self, node: Node, edge: Edge | None, *, complete: bool = False) -> None: ...
-
-    def add_successor(self, node: Node, target: NewNode, outcome: Outcome, order: int) -> tuple[Node, Edge]: ...
+    def edit(self, work_item_id: int, change: Callable[[Edit], T]) -> T: ...
 
 
 class Traverser:
     def __init__(
-        self,
-        store: GraphStore,
-        operations: Mapping[str, Callable[[Node], Outcome]],
-        next_node: Callable[[Graph, Node, Outcome], int | NewNode | None],
+        self, store: GraphStore, operations: Mapping[str, Callable[[Node], Outcome]],
+        apply: Callable[[Edit, Node, Outcome], Edge | None],
+        finalize: Callable[[Graph], str] | None = None,
     ) -> None:
         self.store = store
         self.operations = operations
-        self.next_node = next_node
+        self.apply = apply
+        self.finalize = finalize
 
-    def advance(self, work_item_id: int) -> Step | None:
-        graph = self.store.load(work_item_id)
-        node = graph.current_node()
-        if node is None:
+    def advance(self, work_item_id: int, node_id: int | None = None) -> Step | None:
+        original = self.store.load(work_item_id).select(node_id)
+        if original is None:
             return None
-        return self._advance(graph, node)
-
-    def run(self, work_item_id: int) -> Iterator[Step]:
-        """Continue the saved graph until an operation has no next node."""
-        graph = self.store.load(work_item_id)
-        node = graph.current_node()
-        while node is not None:
-            step = self._advance(graph, node)
-            yield step
-            node = graph.node(step.edge.to_node_id) if step.edge is not None else None
-
-    def _advance(self, graph: Graph, node: Node) -> Step:
-        operation = self.operations.get(node.node_type)
+        operation = self.operations.get(original.node_type)
         if operation is None:
-            raise ValueError(f"No operation registered for {node.node_type!r}")
+            raise ValueError(f'No operation registered for {original.node_type!r}')
+        node = deepcopy(original)
         outcome = operation(node)
-        destination = self.next_node(graph, node, outcome)
-        if isinstance(destination, NewNode):
-            target, edge = self.store.add_successor(node, destination, outcome, graph.next_order(node.id))
-            graph.add_transition(target, edge)
-            return Step(node, outcome, edge)
-        edge = None
-        if destination is not None:
-            edge = graph.transition(node, destination, outcome.name, outcome.data)
-        self.store.save_step(node, edge, complete=outcome.complete)
-        return Step(node, outcome, edge)
+
+        def save(edit: Edit) -> Step:
+            if edit.graph.select(node.id) != original:
+                raise ValueError(f'Node {node.id} changed while running.')
+            edit.graph.nodes[node.id] = node
+            edge = self.apply(edit, node, outcome)
+            complete = outcome.name == 'accept' and edit.graph.can_complete() and self.finalize is not None
+            if complete:
+                edit.finish(self.finalize(edit.graph))
+            return Step(node, replace(outcome, complete=complete), edge)
+
+        return self.store.edit(work_item_id, save)
+
+    def run(self, work_item_id: int, node_id: int | None = None) -> Iterator[Step]:
+        while (step := self.advance(work_item_id, node_id)) is not None:
+            yield step
+            if step.node.status == 'pending' or step.outcome.complete:
+                return
+            node_id = None

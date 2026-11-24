@@ -128,6 +128,40 @@ class Harness:
             raise LookupError("This step has no saved repository snapshot.")
         return GitRepository(Path(project.repository_path)).read_text_file(revision, path)
 
+    def implementation_diff(self, item_id: int, node_id: int, *, full: bool = False) -> dict[str, Any]:
+        project, _ = self.catalog.get_work_item(item_id)
+        graph = self.graphs.load(item_id)
+        node = graph.nodes.get(node_id)
+        if node is None:
+            raise LookupError("That step does not belong to this work item.")
+        data = node.data or {}
+        if node.node_type == NodeType.HUMAN_REVIEW:
+            implementation = graph.nodes.get(data.get("target_id"))
+            reviewed_commit = (data.get("last_decision") or {}).get("reviewed_commit_sha")
+        else:
+            implementation = node
+            reviewed_commit = None
+        if implementation is None or implementation.node_type != NodeType.IMPLEMENTATION:
+            raise LookupError("This step has no implementation to compare.")
+        commit = reviewed_commit or implementation.commit_sha
+        plan = graph.nodes.get((implementation.data or {}).get("plan_id"))
+        base = (plan.data or {}).get("base_commit") if plan is not None else None
+        if not base or not commit:
+            raise LookupError("This implementation has no saved comparison yet.")
+
+        repository = GitRepository(Path(project.repository_path))
+        patch = repository.diff(base, commit, binary=False).encode("utf-8", errors="replace")
+        if full:
+            return {"base_commit": base, "commit": commit, "patch": patch.decode("utf-8"), "truncated": False}
+        byte_limit, line_limit = 64 * 1024, 1500
+        lines = patch[:byte_limit].decode("utf-8", errors="ignore").splitlines(keepends=True)
+        return {
+            "base_commit": base,
+            "commit": commit,
+            "patch": "".join(lines[:line_limit]),
+            "truncated": len(patch) > byte_limit or len(lines) > line_limit,
+        }
+
     @contextmanager
     def _item_operation(self, item_id: int, label: str):
         with self._locks_guard:

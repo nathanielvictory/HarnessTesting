@@ -14,9 +14,11 @@ export function useWorkspace() {
   const [detail, setDetail] = useState<WorkItemDetail | null>(null);
   const [busy, setBusy] = useState('Loading projects…');
   const [pending, setPending] = useState<{ id: number; label: string } | null>(null);
-  const [toolCalls, setToolCalls] = useState<string[]>([]);
+  const [observedActivity, setObservedActivity] = useState<{ id: number; activity: WorkItemActivity } | null>(null);
   const [error, setError] = useState('');
   const [form, setForm] = useState<'project' | 'item' | null>(null);
+  const openItemId = detail?.work_item.id;
+  const itemComplete = detail?.work_item.status === 'complete';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,28 +49,44 @@ export function useWorkspace() {
   }, [projectId, filter, listRevision]);
 
   useEffect(() => {
-    if (!pending) return;
+    if (openItemId === undefined || itemComplete) return;
     const controller = new AbortController();
     const { signal } = controller;
     let timer: number | undefined;
+    let refreshDetail = !pending;
 
     async function poll(id: number) {
+      let active = false;
       try {
         const current = await getWorkItemActivity(id, signal);
-        if (!signal.aborted && current) setToolCalls(current.tools);
+        if (signal.aborted) return;
+        active = Boolean(current);
+        if (current) {
+          refreshDetail = !pending;
+          setObservedActivity({ id, activity: current });
+        } else {
+          if (refreshDetail) {
+            const updated = await getWorkItem(id, signal);
+            if (signal.aborted) return;
+            setDetail(previous => previous?.work_item.id === id ? updated : previous);
+            if (updated.work_item.status === 'complete') setListRevision(revision => revision + 1);
+            refreshDetail = false;
+          }
+          setObservedActivity(null);
+        }
       } catch {
-        // The work item request reports operation errors independently.
+        // A failed background poll can be retried without interrupting the open item.
       } finally {
-        if (!signal.aborted) timer = window.setTimeout(() => void poll(id), 350);
+        if (!signal.aborted) timer = window.setTimeout(() => void poll(id), pending || active ? 500 : 2000);
       }
     }
 
-    void poll(pending.id);
+    void poll(openItemId);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [pending]);
+  }, [openItemId, itemComplete, pending]);
 
   async function run(label: string, action: () => Promise<void>) {
     setBusy(label);
@@ -128,7 +146,7 @@ export function useWorkspace() {
     if (!detail) return;
     const id = detail.work_item.id;
     function execute(step: WorkItemCommand, current: WorkItemDetail) {
-      setToolCalls([]);
+      setObservedActivity(null);
       setPending({ id, label: commandLabel(step, current) });
       return performWorkItemCommand(id, step);
     }
@@ -155,7 +173,8 @@ export function useWorkspace() {
     });
   }
 
-  const activity: WorkItemActivity | null = pending ? { label: pending.label, tools: toolCalls } : null;
+  const liveActivity = observedActivity && observedActivity.id === openItemId ? observedActivity.activity : null;
+  const activity = pending ? { label: pending.label, tools: liveActivity?.tools ?? [] } : liveActivity ?? null;
   return {
     projects, project: projects.find(project => project.id === projectId), projectId,
     filter, items, detail, busy, error, form, activity,

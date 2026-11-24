@@ -75,8 +75,9 @@ class GitRepository:
             _git(worktree, "commit", "-m", message)
         return _git(worktree, "rev-parse", "HEAD").strip()
 
-    def diff(self, base: str, result: str) -> str:
-        return _git(self.path, "diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv",
+    def diff(self, base: str, result: str, *, binary: bool = True) -> str:
+        options = ("--binary",) if binary else ()
+        return _git(self.path, "diff", *options, "--no-color", "--no-ext-diff", "--no-textconv",
                     self.commit_sha(base), self.commit_sha(result), "--")
 
     def read_text_file(self, revision: str, path: str) -> str:

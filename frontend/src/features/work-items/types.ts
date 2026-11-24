@@ -19,6 +19,9 @@ export interface WorkNode {
     approved?: string;
     summary?: string;
     base_commit?: string | null;
+    plan_id?: number;
+    target_id?: number;
+    paused?: boolean;
     revision_note?: string;
     last_decision?: { reviewed_commit_sha?: string };
     [field: string]: unknown;
@@ -55,6 +58,13 @@ export type ReviewDecision = 'accept' | 'feedback' | 'revise' | 'review_earlier'
 export interface WorkItemActivity {
   label: string;
   tools: string[];
+}
+
+export interface ImplementationDiff {
+  base_commit: string;
+  commit: string;
+  patch: string;
+  truncated: boolean;
 }
 
 export type WorkItemCommand =

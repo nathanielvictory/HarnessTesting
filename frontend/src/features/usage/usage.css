@@ -4,12 +4,3 @@
 .usage-summary dl div { display: flex; gap: .5rem; justify-content: space-between; }
 .usage-summary dd { margin: 0; color: #182334; font-variant-numeric: tabular-nums; }
 .usage-summary p { margin-top: .25rem; }
-.main > .usage-summary {
-  background: white;
-  border: 1px solid var(--line);
-  border-radius: .5rem;
-  padding: .7rem 1rem;
-  margin-bottom: 1rem;
-}
-.main > .usage-summary dl { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
-.main > .usage-summary dl div { display: block; }

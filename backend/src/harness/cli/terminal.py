@@ -25,13 +25,15 @@ class Terminal:
         except EOFError as exc:
             raise Quit from exc
 
-    def choose(self, heading: str, choices: Sequence[tuple[str, str]]) -> str:
+    def choose(self, heading: str, choices: Sequence[tuple[str, str]], *, default_first: bool = False) -> str:
         self.show(f"\n{heading}")
         for index, (_, label) in enumerate(choices, 1):
             self.show(f"  {index}. {label}")
         self.show("  q. Quit")
         while True:
-            answer = self.ask("> ")
+            answer = self.ask('> [1] ' if default_first else '> ')
+            if not answer and default_first:
+                return choices[0][0]
             if answer.lower() == "q":
                 raise Quit
             if answer.isdecimal() and 1 <= int(answer) <= len(choices):

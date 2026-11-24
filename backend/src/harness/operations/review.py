@@ -17,4 +17,4 @@ def record_review(node: Node, target: Node, decision: ReviewDecision, note: str 
     if target.commit_sha is not None:
         evidence["reviewed_commit_sha"] = target.commit_sha
     node.data = {**(node.data or {}), "last_decision": {"action": decision.value, **evidence}}
-    return Outcome(decision.value, evidence, complete=decision is ReviewDecision.ACCEPT)
+    return Outcome(decision.value, evidence)

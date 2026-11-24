@@ -13,6 +13,7 @@ from harness.agents.harness import AgentHarness
 from harness.application import Harness, WorkItemConflict
 from harness.git.repository import GitError
 from harness.operations.review import ReviewDecision
+from harness.operations.work_session import ScopedWork
 from harness.persistence.catalog import ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
 from harness.persistence.models import WorkItemStatus
@@ -31,11 +32,28 @@ class WorkItemRequest(BaseModel):
     title: str | None = None
 
 
-class MessageRequest(BaseModel):
+class NodeRequest(BaseModel):
+    node_id: int | None = None
+
+
+class MessageRequest(NodeRequest):
     message: str
 
 
-class ReviewRequest(BaseModel):
+class ScopedRequest(NodeRequest):
+    pieces: list[ScopedWork]
+
+
+class ApprovalRequest(NodeRequest):
+    pieces: list[ScopedWork] | None = None
+
+
+class ReopenRequest(BaseModel):
+    node_id: int
+    note: str
+
+
+class ReviewRequest(NodeRequest):
     decision: ReviewDecision
     note: str = ""
     earlier_id: int | None = None
@@ -139,19 +157,28 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
 
     @app.post("/api/work-items/{item_id}/messages")
     def talk(item_id: int, body: MessageRequest) -> dict:
-        return harness.talk(item_id, body.message)
+        return harness.talk(item_id, body.message, body.node_id)
 
     @app.post("/api/work-items/{item_id}/approve")
-    def approve(item_id: int) -> dict:
-        return harness.approve(item_id)
+    def approve(item_id: int, body: ApprovalRequest | None = None) -> dict:
+        body = body or ApprovalRequest()
+        return harness.approve(item_id, body.node_id, body.pieces)
 
     @app.post("/api/work-items/{item_id}/implement")
-    def implement(item_id: int) -> dict:
-        return harness.implement(item_id)
+    def implement(item_id: int, body: NodeRequest | None = None) -> dict:
+        return harness.implement(item_id, body.node_id if body else None)
+
+    @app.post('/api/work-items/{item_id}/discover')
+    def discover(item_id: int, body: ScopedRequest) -> dict:
+        return harness.discover(item_id, body.pieces, body.node_id)
+
+    @app.post('/api/work-items/{item_id}/reopen')
+    def reopen(item_id: int, body: ReopenRequest) -> dict:
+        return harness.reopen(item_id, body.node_id, body.note)
 
     @app.post("/api/work-items/{item_id}/review")
     def review(item_id: int, body: ReviewRequest) -> dict:
-        return harness.review(item_id, body.decision, body.note, body.earlier_id)
+        return harness.review(item_id, body.decision, body.note, body.earlier_id, body.node_id)
 
     app.mount("/", mcp_app)
     return app

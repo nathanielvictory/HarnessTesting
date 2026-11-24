@@ -1,5 +1,7 @@
 import subprocess
+from hashlib import sha256
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class GitError(RuntimeError):
@@ -98,6 +100,30 @@ class GitRepository:
             raise ValueError("Only UTF-8 text files can be previewed.")
         return content
 
-    def merge(self, worktree: Path, revision: str) -> str:
-        _git(worktree, "merge", "--no-edit", "--", self.commit_sha(revision))
-        return _git(worktree, "rev-parse", "HEAD").strip()
+    def integrate(self, item_id: int, base: str, revisions: list[str], *, final: bool = False) -> str:
+        """Merge saved snapshots without touching the developer's checkout or step branches."""
+        base = self.commit_sha(base)
+        commits = list(dict.fromkeys(self.commit_sha(ref) for ref in revisions))
+        digest = sha256(' '.join([base, *commits]).encode()).hexdigest()
+        cache_ref = f'refs/harness/integrations/{item_id}/{digest}'
+        known = _git(self.path, 'for-each-ref', '--format=%(objectname)', cache_ref).strip()
+        if known:
+            result = known
+        elif not commits or commits == [base]:
+            result = base
+        else:
+            with TemporaryDirectory(prefix='harness-integrate-') as directory:
+                checkout = Path(directory) / 'checkout'
+                _git(self.path, 'worktree', 'add', '--detach', '--', str(checkout), base)
+                try:
+                    for commit in commits:
+                        _git(checkout, 'merge', '--no-edit', '--', commit)
+                    result = _git(checkout, 'rev-parse', 'HEAD').strip()
+                    _git(self.path, 'update-ref', cache_ref, result)
+                except GitError as exc:
+                    raise GitError(f'Could not integrate saved work: {exc}') from exc
+                finally:
+                    _git(self.path, 'worktree', 'remove', '--force', '--', str(checkout))
+        if final:
+            _git(self.path, 'update-ref', f'refs/harness/results/{item_id}', result)
+        return result

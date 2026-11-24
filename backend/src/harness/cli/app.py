@@ -6,7 +6,7 @@ from harness.git.repository import GitError, GitRepository
 from harness.graph.state import Graph, Node
 from harness.graph.traverser import Step
 from harness.operations.review import ReviewDecision
-from harness.operations.work_session import WorkSession
+from harness.operations.work_session import ScopedWork, WorkSession
 from harness.persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
 from harness.persistence.graph.repository import GraphRepository
@@ -92,14 +92,31 @@ class Application:
             item.id, self.store, GitRepository(Path(project.repository_path)),
             agent, self.state_dir / "worktrees", item.title,
         )
-        while (node := work.graph().current_node()) is not None:
+        while True:
+            graph = work.graph()
+            ready = graph.current_nodes()
+            if not ready:
+                self._show_graph(graph)
+                return
+            node = ready[0]
+            if len(ready) > 1:
+                choice = self.terminal.choose('Ready steps (newest first)', [
+                    *((str(item.id), _label(item)) for item in ready),
+                    ('graph', 'View graph and blockers'), ('back', 'Back to work items'),
+                ], default_first=True)
+                if choice == 'back':
+                    return
+                if choice == 'graph':
+                    self._show_graph(graph)
+                    continue
+                node = graph.node(int(choice))
             match node.node_type:
                 case NodeType.GOAL_ALIGNMENT | NodeType.TECHNICAL_PLANNING:
                     self._talk(work, node)
                 case NodeType.IMPLEMENTATION:
-                    self._check_pause(work.implement())
+                    self._check_pause(work.implement(node.id))
                 case NodeType.HUMAN_REVIEW:
-                    if self._review(work):
+                    if self._review(work, node.id):
                         return
                 case _:
                     self.terminal.show(f"No interactive operation is configured for {node.node_type}.")
@@ -111,12 +128,14 @@ class Application:
         if data.get("draft"):
             self.terminal.show(data["draft"])
         elif node.conversation is None:
-            initial = data.get("revision_note")
+            initial = data.get('revision_note') or data.get('scope_brief')
             if initial or node.node_type == NodeType.TECHNICAL_PLANNING:
-                step = work.talk(initial or "Draft the technical plan.")
+                step = work.talk(initial or "Draft the technical plan.", node.id)
                 self._check_pause(step)
                 self.terminal.show((step.node.data or {})["draft"])
-        self.terminal.show("Type a message, or use /approve, /graph, or /quit.")
+        self.terminal.show('Type a message, or use /approve, /discover, /reopen, /graph, or /quit.')
+        if node.node_type == NodeType.TECHNICAL_PLANNING:
+            self.terminal.show('Use /split to approve the plan and delegate its implementation.')
         while True:
             message = self.terminal.ask("You > ")
             match message:
@@ -124,51 +143,68 @@ class Application:
                     raise Quit
                 case "/graph":
                     self._show_graph(work.graph())
-                case "/approve":
-                    current = work.graph().current_node()
+                case '/discover':
+                    work.discover(self._pieces(), node.id)
+                    return
+                case '/reopen':
+                    work.reopen(int(self.terminal.ask('Step ID: ')), self.terminal.ask('What should change? '))
+                    return
+                case '/approve' | '/split':
+                    current = work.graph().select(node.id)
                     if not (current and (current.data or {}).get("draft")):
                         self.terminal.show("Discuss the work with the agent before approving a draft.")
                         continue
-                    work.approve()
+                    work.approve(node.id, self._pieces() if message == '/split' else None)
                     return
                 case "":
                     continue
                 case _:
-                    step = work.talk(message)
+                    step = work.talk(message, node.id)
                     self._check_pause(step)
                     self.terminal.show((step.node.data or {})["draft"])
 
-    def _review(self, work: WorkSession) -> bool:
-        target = work.review_target()
+    def _pieces(self) -> list[ScopedWork]:
+        pieces = []
+        while brief := self.terminal.ask('Scoped brief (blank to finish): '):
+            dependencies = self.terminal.ask('Prerequisite piece numbers (1-based, comma-separated; blank for none): ')
+            pieces.append(ScopedWork(brief, [int(value) - 1 for value in dependencies.split(',') if value.strip()]))
+        return pieces
+
+    def _review(self, work: WorkSession, node_id: int) -> bool:
+        target = work.review_target(node_id)
         data = target.data or {}
         self.terminal.show(f"\nReview · {_label(target)}")
         if target.node_type == NodeType.IMPLEMENTATION:
             self.terminal.show(f"Branch: {(target.branch_ref or '').removeprefix('refs/heads/')} · commit {target.commit_sha}")
             self.terminal.show(data.get("summary", ""))
             options = [
-                ("accept", "Accept and complete the work item"),
+                ("accept", "Accept this piece"),
                 ("feedback", "Send feedback to the same implementation conversation"),
-                ("revise", "Revise the technical plan and retry from its base"),
+                ("revise", "Reopen implementation and retry from its base"),
                 ("review_earlier", "Review an earlier step"),
             ]
         else:
             self.terminal.show(data.get("approved", ""))
             options = [("revise", "Revise this step"), ("return", "Return to implementation review")]
         while True:
-            choice = self.terminal.choose("Review decision", [*options, ("graph", "View graph")])
+            choice = self.terminal.choose('Review decision', [*options, ('graph', 'View graph'),
+                                                               ('discover', 'Add scoped prerequisites')])
+            if choice == 'discover':
+                work.discover(self._pieces(), node_id)
+                return False
             if choice == "graph":
                 self._show_graph(work.graph())
                 continue
             decision = ReviewDecision(choice)
             if decision is ReviewDecision.REVIEW_EARLIER:
-                options = [(str(node.id), _label(node)) for node in work.earlier_steps()]
+                options = [(str(node.id), _label(node)) for node in work.earlier_steps(node_id)]
                 earlier = self.terminal.choose("Earlier step to review", options)
-                work.review(decision, earlier_id=int(earlier))
+                work.review(decision, earlier_id=int(earlier), node_id=node_id)
             else:
                 note = self.terminal.ask("What should change? ") if decision in (
                     ReviewDecision.FEEDBACK, ReviewDecision.REVISE
                 ) else ""
-                step = work.review(decision, note)
+                step = work.review(decision, note, node_id=node_id)
                 if step.outcome.complete:
                     self.terminal.show("Work item complete.")
                     return True
@@ -189,9 +225,12 @@ class Application:
                 f"  {_label(graph.node(edge.from_node_id))} → {_label(graph.node(edge.to_node_id))}"
                 f" ({edge.outcome}{evidence})"
             )
-        current = graph.current_node()
-        if current is not None:
-            self.terminal.show(f"  Current: {_label(current)}")
+        for node in graph.current_nodes():
+            self.terminal.show(f'  Ready: {_label(node)}')
+        for node in graph.nodes.values():
+            if node.status == 'pending':
+                for blocker in graph.blockers(node):
+                    self.terminal.show(f"  Blocked: {_label(node)} — {blocker['reason']} (#{blocker['node_id']})")
 
     @staticmethod
     def _check_pause(step: Step) -> None:
@@ -200,4 +239,5 @@ class Application:
 
 
 def _label(node: Node) -> str:
-    return f"#{node.id} {node.node_type.replace('_', ' ')}"
+    brief = (node.data or {}).get('scope_brief')
+    return f"#{node.id} {node.node_type.replace('_', ' ')}" + (f' · {brief}' if brief else '')

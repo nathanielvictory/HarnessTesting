@@ -19,8 +19,10 @@ class FakeAgent:
 
     def __init__(self):
         self.turns = []
+        self.prompts = []
 
     def run_turn(self, prompt, **kwargs):
+        self.prompts.append(prompt)
         if self.turns:
             return self.turns.pop(0)(kwargs['worktree'], kwargs['conversation'])
         return AgentTurn('Draft: ' + prompt, {'messages': []})
@@ -57,9 +59,11 @@ class FrontierTest(unittest.TestCase):
         return [node.id for node in self.work.graph().current_nodes()]
 
     def plan(self, goal_id=None):
-        self.work.talk('Draft the brief', goal_id)
+        if goal_id is None:
+            goal_id, = self.ready()
+        self.work.start(goal_id, 'Draft the brief')
         plan = self.work.approve(goal_id).edge.to_node_id
-        self.work.talk('Draft the plan', plan)
+        self.work.start(plan, 'Draft the plan')
         return plan
 
     def implementation(self, goal_id):
@@ -73,15 +77,44 @@ class FrontierTest(unittest.TestCase):
 
     def accept(self, impl_id, filename):
         self.write_turn(filename, filename)
-        review = self.work.implement(impl_id).edge.to_node_id
+        review = self.work.start(impl_id).edge.to_node_id
         return self.work.review(ReviewDecision.ACCEPT, node_id=review)
 
-    def test_independent_defaults_and_explicit_selection(self):
+    def test_independent_nodes_require_explicit_selection(self):
         self.work.approve(self.plan(), [ScopedWork('First'), ScopedWork('Second')])
         newest, oldest = self.ready()
         self.assertGreater(newest, oldest)
-        self.assertEqual(self.work.talk('Default').node.id, newest)
-        self.assertEqual(self.work.talk('Choose older', oldest).node.id, oldest)
+        with self.assertRaises(TypeError):
+            self.work.start()
+        self.assertEqual(self.work.start(oldest, 'Choose older').node.id, oldest)
+        self.assertIsNone(self.work.graph().node(newest).conversation)
+
+    def test_start_and_follow_up_are_distinct(self):
+        goal, = self.ready()
+        with self.assertRaisesRegex(ValueError, 'Start this node'):
+            self.work.follow_up(goal, 'Too early')
+        self.work.start(goal, 'Draft the brief')
+        with self.assertRaisesRegex(ValueError, 'already has a conversation'):
+            self.work.start(goal)
+        plan = self.work.approve(goal).edge.to_node_id
+        self.work.start(plan, 'Draft the plan')
+        self.assertIn('Approved brief', self.agent.prompts[-1])
+        self.assertIsNone(self.work.follow_up(plan, 'Explain the plan').edge)
+        self.assertEqual(self.agent.prompts[-1], 'Explain the plan')
+        self.assertEqual(self.ready(), [plan])
+
+    def test_implementation_feedback_follows_up_on_saved_conversation(self):
+        impl = self.work.approve(self.plan()).edge.to_node_id
+        self.write_turn('implementation.txt', 'first version')
+        review = self.work.start(impl).edge.to_node_id
+        self.assertIn('Approved technical plan', self.agent.prompts[-1])
+        follow_up = self.work.review(ReviewDecision.FEEDBACK, 'Adjust the result', node_id=review).edge.to_node_id
+        with self.assertRaisesRegex(ValueError, 'already has a conversation'):
+            self.work.start(follow_up)
+        self.write_turn('implementation.txt', 'updated version')
+        next_review = self.work.follow_up(follow_up, 'Adjust the result').edge.to_node_id
+        self.assertEqual(self.agent.prompts[-1], 'Adjust the result')
+        self.assertEqual(self.work.review_target(next_review).id, follow_up)
 
     def test_ordered_pieces_and_interrupted_implementation(self):
         plan = self.plan()
@@ -91,17 +124,17 @@ class FrontierTest(unittest.TestCase):
         self.assertEqual(self.ready(), [a])
         self.assertEqual(graph.blockers(graph.node(b))[0]['node_id'], a)
         with self.assertRaisesRegex(ValueError, 'not ready'):
-            self.work.talk('Not yet', b)
+            self.work.start(b, 'Not yet')
         self.assertFalse(self.accept(self.implementation(a), 'a.txt').outcome.complete)
         b_impl = self.implementation(b)
         self.write_turn('b.txt', 'unfinished', 'Need a helper.\nPREREQUISITES: ["Utility U"]')
-        interrupted = self.work.implement(b_impl)
+        interrupted = self.work.start(b_impl)
         self.assertEqual(interrupted.outcome.name, 'blocked')
         snapshot = interrupted.node.commit_sha
         resume = interrupted.edge.to_node_id
         utility, = self.ready()
         with self.assertRaisesRegex(ValueError, 'not ready'):
-            self.work.implement(resume)
+            self.work.follow_up(resume, 'Continue the interrupted implementation.')
         self.assertFalse(self.work.graph().can_complete())
         self.assertIs(self.catalog.get_work_item(self.item.id)[1].status, WorkItemStatus.IN_PROGRESS)
         utility_impl = self.implementation(utility)
@@ -112,7 +145,7 @@ class FrontierTest(unittest.TestCase):
             return AgentTurn('Utility done', {'messages': []})
 
         self.agent.turns.append(implement_utility)
-        utility_review = self.work.implement(utility_impl).edge.to_node_id
+        utility_review = self.work.start(utility_impl).edge.to_node_id
         self.assertFalse(self.work.review(ReviewDecision.ACCEPT, node_id=utility_review).outcome.complete)
         self.assertEqual(self.ready(), [resume])
 
@@ -125,7 +158,7 @@ class FrontierTest(unittest.TestCase):
             return AgentTurn('Done', {'messages': []})
 
         self.agent.turns.append(continue_b)
-        review = self.work.implement(resume).edge.to_node_id
+        review = self.work.follow_up(resume, 'Continue the interrupted implementation.').edge.to_node_id
         self.assertTrue(self.work.review(ReviewDecision.ACCEPT, node_id=review).outcome.complete)
         graph = self.work.graph()
         self.assertTrue(graph.scope_accepted(a))
@@ -175,7 +208,7 @@ class FrontierTest(unittest.TestCase):
         self.assertFalse(self.accept(self.implementation(a), 'shared.txt').outcome.complete)
         impl = self.implementation(b)
         self.write_turn('shared.txt', 'conflicting edit')
-        review = self.work.implement(impl).edge.to_node_id
+        review = self.work.start(impl).edge.to_node_id
         with self.assertRaisesRegex(GitError, 'Could not integrate'):
             self.work.review(ReviewDecision.ACCEPT, node_id=review)
         self.assertEqual(self.ready(), [review])
@@ -190,7 +223,7 @@ class FrontierTest(unittest.TestCase):
                 row = session.get(NodeRecord, node_id)
                 row.data = {key: value for key, value in row.data.items() if key != '_workflow'}
         self.assertEqual(self.ready(), [plan])
-        impl = self.work.approve().edge.to_node_id
+        impl = self.work.approve(plan).edge.to_node_id
         self.assertEqual(self.ready(), [impl])
         self.assertTrue(self.accept(impl, 'straight.txt').outcome.complete)
 

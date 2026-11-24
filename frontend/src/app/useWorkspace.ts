@@ -107,7 +107,7 @@ export function useWorkspace() {
       setDetail(updated);
 
       const next = (command.type === 'approve' || command.type === 'review') &&
-        followUpCommand(detail, updated, command.node_id ?? detail.current_node_id);
+        automaticTurn(detail, updated, command.node_id);
       if (next) {
         setBusy(commandLabel(next, updated));
         updated = await performWorkItemCommand(id, next);
@@ -116,7 +116,7 @@ export function useWorkspace() {
 
       if (updated.work_item.status === 'complete') {
         if (command.type === 'close') selectFilter('complete');
-          setListRevision(revision => revision + 1);
+        setListRevision(revision => revision + 1);
       }
     });
   }
@@ -130,11 +130,14 @@ export function useWorkspace() {
 
 function commandLabel(command: WorkItemCommand, detail: WorkItemDetail) {
   switch (command.type) {
+    case 'start':
     case 'messages':
-      return detail.nodes.find(node => node.id === (command.node_id ?? detail.current_node_id))?.node_type === 'technical_planning'
-        ? 'Preparing the technical plan' : 'Preparing an alignment reply';
+      switch (detail.nodes.find(node => node.id === command.node_id)?.node_type) {
+        case 'implementation': return 'Implementing the plan';
+        case 'technical_planning': return 'Preparing the technical plan';
+        default: return 'Preparing an alignment reply';
+      }
     case 'approve': return 'Saving approval';
-    case 'implement': return 'Implementing the plan';
     case 'review': return 'Recording the review';
     case 'close': return 'Closing the work item';
     case 'discover': return 'Adding scoped prerequisites';
@@ -143,13 +146,17 @@ function commandLabel(command: WorkItemCommand, detail: WorkItemDetail) {
 }
 
 // Preserve the existing automatic follow-up after a browser approval or review.
-function followUpCommand(before: WorkItemDetail, detail: WorkItemDetail, source: number | null): WorkItemCommand | undefined {
+function automaticTurn(before: WorkItemDetail, detail: WorkItemDetail, source: number): WorkItemCommand | undefined {
   if (detail.work_item.status === 'complete' || before.ready_node_ids.length !== 1 || detail.ready_node_ids.length !== 1) return;
-  const current = detail.nodes.find(node => node.id === detail.current_node_id);
+  const current = detail.nodes.find(node => node.id === detail.ready_node_ids[0]);
   if (!current || !detail.transitions.slice(before.transitions.length).some(edge =>
     edge.from_node_id === source && edge.to_node_id === current.id && edge.outcome !== 'delegated')) return;
-  if (current.node_type === 'implementation') return { type: 'implement', node_id: current.id };
-  if (current.node_type === 'technical_planning' && !current.messages.length) {
-    return { type: 'messages', node_id: current.id, message: current.data?.revision_note || 'Draft the technical plan.' };
+  if (current.node_type === 'implementation') {
+    return current.conversation_started
+      ? { type: 'messages', node_id: current.id, message: current.data?.feedback || 'Continue the interrupted implementation.' }
+      : { type: 'start', node_id: current.id };
+  }
+  if (current.node_type === 'technical_planning' && !current.conversation_started) {
+    return { type: 'start', node_id: current.id, message: current.data?.revision_note };
   }
 }

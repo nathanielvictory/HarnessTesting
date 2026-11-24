@@ -2,7 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
-from harness.graph.state import Node
+from harness.graph.state import Graph, Node
 from harness.graph.traverser import Outcome
 
 
@@ -22,10 +22,19 @@ class GoalAlignment:
         self.agents = agents
         self.progress = progress
 
-    def talk(self, node: Node, message: str, worktree: Path) -> Outcome:
+    def start(self, _graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
         data = node.data or {}
-        if node.conversation is None and data.get("previous_brief"):
+        message = message or 'Draft the brief.'
+        if seed := data.get('scope_brief'):
+            message = f'Scoped work: {seed}\n\n{message}'
+        if data.get("previous_brief"):
             message = f"Previous brief\n{data['previous_brief']}\n\nRevision request\n{message}"
+        return self._turn(node, message, worktree)
+
+    def follow_up(self, _graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
+        return self._turn(node, message, worktree)
+
+    def _turn(self, node: Node, message: str, worktree: Path) -> Outcome:
         model = self.agents.model
         result = self.agents.run_turn(
             message, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
@@ -35,5 +44,5 @@ class GoalAlignment:
         node.conversation = result.conversation
         if result.paused:
             return Outcome("paused")
-        node.data = {**data, "draft": result.output}
+        node.data = {**(node.data or {}), "draft": result.output}
         return Outcome("reply")

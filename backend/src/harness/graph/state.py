@@ -125,14 +125,11 @@ class Graph:
             key=lambda node: node.id, reverse=True,
         )
 
-    def select(self, node_id: int | None = None) -> Node | None:
-        ready = self.current_nodes()
-        if node_id is None:
-            return ready[0] if ready else None
-        for node in ready:
-            if node.id == node_id:
-                return node
-        raise ValueError(f'Node {node_id} is not ready.')
+    def select(self, node_id: int) -> Node:
+        node = self.node(node_id)
+        if node.status != 'pending' or self.blockers(node):
+            raise ValueError(f'Node {node_id} is not ready.')
+        return node
 
     def record_transition(self, source: int, target: int, outcome: str, data: dict | None) -> Edge:
         self.node(source)

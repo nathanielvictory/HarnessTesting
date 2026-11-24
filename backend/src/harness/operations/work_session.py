@@ -30,39 +30,25 @@ class WorkSession:
         self.store = store
         self.repository = repository
         self.worktrees = worktrees
-        self.title = title or f'Work item {item_id}'
-        self.alignment = GoalAlignment(agents, progress=progress)
-        self.planning = TechnicalPlanning(agents, progress=progress)
-        self.implementation = Implementation(repository, agents, progress=progress)
+        self.agents = {
+            NodeType.GOAL_ALIGNMENT: GoalAlignment(agents, progress=progress),
+            NodeType.TECHNICAL_PLANNING: TechnicalPlanning(agents, progress=progress),
+            NodeType.IMPLEMENTATION: Implementation(repository, agents, title or f'Work item {item_id}',
+                                                    progress=progress),
+        }
 
     def graph(self) -> Graph:
         return self.store.load(self.item_id)
 
-    def talk(self, message: str, node_id: int | None = None) -> Step:
-        graph, node = self._current(node_id)
-        match node.node_type:
-            case NodeType.GOAL_ALIGNMENT:
-                def align(current: Node) -> Outcome:
-                    base = self._base(graph, current)
-                    current.data = {**_data(current), 'base_commit': base}
-                    seed = _data(current).get('scope_brief')
-                    prompt = f'Scoped work: {seed}\n\n{message}' if seed and not current.conversation else message
-                    return self.alignment.talk(current, prompt, self._open_checkout(current, base))
+    def start(self, node_id: int, message: str = '') -> Step:
+        return self._run_agent(node_id, message.strip(), starting=True)
 
-                return self._advance(node, align)
-            case NodeType.TECHNICAL_PLANNING:
-                goal = graph.node(_data(node)['goal_id'])
+    def follow_up(self, node_id: int, message: str) -> Step:
+        if not message.strip():
+            raise ValueError('Enter a message.')
+        return self._run_agent(node_id, message.strip(), starting=False)
 
-                def plan(current: Node) -> Outcome:
-                    base = self._base(graph, current)
-                    current.data = {**_data(current), 'base_commit': base}
-                    return self.planning.talk(current, _data(goal)['approved'], message, self._open_checkout(current, base))
-
-                return self._advance(node, plan)
-            case _:
-                raise ValueError('Choose a ready brief or plan to discuss.')
-
-    def approve(self, node_id: int | None = None, pieces: list[ScopedWork] | None = None) -> Step:
+    def approve(self, node_id: int, pieces: list[ScopedWork] | None = None) -> Step:
         graph, node = self._current(node_id)
         draft = _data(node).get('draft')
         if not draft:
@@ -91,32 +77,34 @@ class WorkSession:
 
         return self._advance(node, approve_draft, apply)
 
-    def implement(self, node_id: int | None = None) -> Step:
-        graph, node = self._current(node_id, NodeType.IMPLEMENTATION)
-        plan = graph.node(_data(node)['plan_id'])
-        goal = graph.node(_data(plan)['goal_id'])
+    def _run_agent(self, node_id: int, message: str, *, starting: bool) -> Step:
+        graph, node = self._current(node_id)
+        agent = self.agents.get(node.node_type)
+        if agent is None:
+            raise ValueError(f'Node {node.id} has no subagent.')
+        if starting and node.conversation is not None:
+            raise ValueError('This node already has a conversation. Send a follow-up instead.')
+        if not starting and node.conversation is None:
+            raise ValueError('Start this node before sending a follow-up.')
+        turn = agent.start if starting else agent.follow_up
 
         def run(current: Node) -> Outcome:
-            checkout = self._open_checkout(
-                current, self._base(graph, current, snapshot=current.commit_sha),
-                legacy_path=self.worktrees / str(current.id),
-            )
-            return self.implementation.run(
-                current, brief=_data(goal)['approved'], plan=_data(plan)['approved'],
-                feedback=_data(current).get('feedback') or self._legacy_feedback(graph, current),
-                worktree=checkout, commit_message=self.title,
-            )
+            base = self._base(graph, current, snapshot=current.commit_sha)
+            if current.commit_sha is None:
+                current.data = {**_data(current), 'base_commit': base}
+            checkout = self._open_checkout(current, base, legacy_path=self.worktrees / str(current.id))
+            return turn(graph, current, message, checkout)
 
         def apply(edit: Edit, source: Node, outcome: Outcome) -> Edge | None:
             if outcome.name == 'blocked':
                 return self._suspend(edit, source, [ScopedWork(brief) for brief in outcome.data['briefs']])
-            if outcome.name == 'paused':
-                return None
-            return self._successor(edit, source, NewNode(NodeType.HUMAN_REVIEW, {'target_id': source.id}), outcome)
+            if outcome.name == 'review':
+                return self._successor(edit, source, NewNode(NodeType.HUMAN_REVIEW, {'target_id': source.id}), outcome)
+            return None
 
         return self._advance(node, run, apply)
 
-    def discover(self, pieces: list[ScopedWork], node_id: int | None = None) -> Step:
+    def discover(self, pieces: list[ScopedWork], node_id: int) -> Step:
         _, node = self._current(node_id)
         return self._advance(node, lambda _: Outcome('blocked'),
                              lambda edit, source, _: self._suspend(edit, source, pieces))
@@ -147,11 +135,11 @@ class WorkSession:
                                requires=[child.id for child in children])
         return edit.transition(source, resume, 'interrupted', {'prerequisites': [child.id for child in children]})
 
-    def review_target(self, node_id: int | None = None) -> Node:
+    def review_target(self, node_id: int) -> Node:
         graph, review = self._current(node_id, NodeType.HUMAN_REVIEW)
         return graph.node(_data(review)['target_id'])
 
-    def earlier_steps(self, node_id: int | None = None) -> list[Node]:
+    def earlier_steps(self, node_id: int) -> list[Node]:
         graph, review = self._current(node_id, NodeType.HUMAN_REVIEW)
         target = graph.node(_data(review)['target_id'])
         if target.node_type != NodeType.IMPLEMENTATION:
@@ -159,8 +147,8 @@ class WorkSession:
         plan = graph.node(_data(target)['plan_id'])
         return [plan, graph.node(_data(plan)['goal_id'])]
 
-    def review(self, decision: ReviewDecision, note: str = '', *, earlier_id: int | None = None,
-               node_id: int | None = None) -> Step:
+    def review(self, decision: ReviewDecision, note: str = '', *, node_id: int,
+               earlier_id: int | None = None) -> Step:
         graph, review = self._current(node_id, NodeType.HUMAN_REVIEW)
         data = _data(review)
         target = graph.node(data['target_id'])
@@ -261,11 +249,9 @@ class WorkSession:
             raise ValueError('Reopen the prerequisite before revising work that depends on it.')
         return edge
 
-    def _current(self, node_id: int | None, node_type: NodeType | None = None) -> tuple[Graph, Node]:
+    def _current(self, node_id: int, node_type: NodeType | None = None) -> tuple[Graph, Node]:
         graph = self.graph()
         node = graph.select(node_id)
-        if node is None:
-            raise ValueError('This work item has no ready steps.')
         if node_type is not None and node.node_type != node_type:
             raise ValueError(f'Node {node.id} is {node.node_type}, expected {node_type.value}.')
         return graph, node
@@ -273,9 +259,7 @@ class WorkSession:
     def _advance(self, node: Node, operation: Callable[[Node], Outcome],
                  apply: Callable[[Edit, Node, Outcome], Edge | None] | None = None) -> Step:
         runner = Traverser(self.store, {node.node_type: operation}, apply or (lambda *_: None), self._finalize)
-        step = runner.advance(self.item_id, node.id)
-        assert step is not None
-        return step
+        return runner.advance(self.item_id, node.id)
 
     @staticmethod
     def _successor(edit: Edit, source: Node, destination: NewNode, outcome: Outcome) -> Edge:
@@ -327,11 +311,6 @@ class WorkSession:
         checkout.parent.mkdir(parents=True, exist_ok=True)
         node.branch_ref = node.branch_ref or f'refs/heads/harness/{self.item_id}-{node.id}'
         return self.repository.open_worktree(checkout, node.branch_ref, commit, legacy_path=legacy_path)
-
-    @staticmethod
-    def _legacy_feedback(graph: Graph, node: Node) -> str | None:
-        return next(((edge.data or {}).get('note') for edge in reversed(graph.history())
-                     if edge.to_node_id == node.id and edge.outcome == 'feedback'), None)
 
 
 def _data(node: Node) -> dict:

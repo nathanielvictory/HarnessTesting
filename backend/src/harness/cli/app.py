@@ -103,7 +103,7 @@ class Application:
                 choice = self.terminal.choose('Ready steps (newest first)', [
                     *((str(item.id), _label(item)) for item in ready),
                     ('graph', 'View graph and blockers'), ('back', 'Back to work items'),
-                ], default_first=True)
+                ])
                 if choice == 'back':
                     return
                 if choice == 'graph':
@@ -114,7 +114,14 @@ class Application:
                 case NodeType.GOAL_ALIGNMENT | NodeType.TECHNICAL_PLANNING:
                     self._talk(work, node)
                 case NodeType.IMPLEMENTATION:
-                    self._check_pause(work.implement(node.id))
+                    if node.conversation is None:
+                        self._check_pause(work.start(node.id))
+                    else:
+                        feedback = (node.data or {}).get('feedback') or next((
+                            (edge.data or {}).get('note') for edge in reversed(graph.history())
+                            if edge.to_node_id == node.id and edge.outcome == 'feedback'
+                        ), None)
+                        self._check_pause(work.follow_up(node.id, feedback or 'Continue the interrupted implementation.'))
                 case NodeType.HUMAN_REVIEW:
                     if self._review(work, node.id):
                         return
@@ -130,8 +137,9 @@ class Application:
         elif node.conversation is None:
             initial = data.get('revision_note') or data.get('scope_brief')
             if initial or node.node_type == NodeType.TECHNICAL_PLANNING:
-                step = work.talk(initial or "Draft the technical plan.", node.id)
+                step = work.start(node.id, initial or "Draft the technical plan.")
                 self._check_pause(step)
+                node = step.node
                 self.terminal.show((step.node.data or {})["draft"])
         self.terminal.show('Type a message, or use /approve, /discover, /reopen, /graph, or /quit.')
         if node.node_type == NodeType.TECHNICAL_PLANNING:
@@ -159,8 +167,9 @@ class Application:
                 case "":
                     continue
                 case _:
-                    step = work.talk(message, node.id)
+                    step = work.start(node.id, message) if node.conversation is None else work.follow_up(node.id, message)
                     self._check_pause(step)
+                    node = step.node
                     self.terminal.show((step.node.data or {})["draft"])
 
     def _pieces(self) -> list[ScopedWork]:

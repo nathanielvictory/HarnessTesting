@@ -11,12 +11,13 @@ export function DiscussionStep({ node, done, busy, links, perform, alignment }: 
     <form className="composer" onSubmit={event => {
       event.preventDefault();
       if (!busy && message.trim()) {
-        perform({ type: 'messages', message }, () => saveDraft({ text: '' }));
+        perform({ type: node.conversation_started ? 'messages' : 'start', node_id: node.id, message },
+          () => saveDraft({ text: '' }));
       }
     }}>
       <textarea aria-label="Message" placeholder={alignment ? 'Describe the outcome you want…' : 'Message the planning agent…'}
         value={message} onChange={event => saveDraft({ text: event.target.value })} rows={2} disabled={busy} required />
-      {node.data?.draft && <button type="button" disabled={busy} onClick={() => perform({ type: 'approve' })}>
+      {node.data?.draft && <button type="button" disabled={busy} onClick={() => perform({ type: 'approve', node_id: node.id })}>
         Approve {alignment ? 'brief' : 'plan'}
       </button>}
       <button className="primary" disabled={busy || !message.trim()}>Send</button>

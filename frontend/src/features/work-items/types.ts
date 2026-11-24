@@ -14,6 +14,7 @@ export interface WorkNode {
   model: string | null;
   branch_ref: string | null;
   commit_sha: string | null;
+  conversation_started: boolean;
   status: 'pending' | 'done' | 'superseded';
   scope_id: number;
   scope_brief: string | null;
@@ -26,6 +27,7 @@ export interface WorkNode {
     plan_id?: number;
     target_id?: number;
     paused?: boolean;
+    feedback?: string;
     revision_note?: string;
     last_decision?: { reviewed_commit_sha?: string };
     [field: string]: unknown;
@@ -51,14 +53,12 @@ export interface WorkItemDetail {
   project: Project;
   work_item: WorkItem;
   entry_node_id: number | null;
-  current_node_id: number | null;
   ready_node_ids: number[];
   blocked: Record<number, { node_id: number; reason: string }[]>;
   result_commit: string | null;
   reviews: Record<number, Review>;
   nodes: WorkNode[];
   transitions: Transition[];
-  review: Review | null;
 }
 
 export type ReviewDecision = 'accept' | 'feedback' | 'revise' | 'review_earlier' | 'return';
@@ -89,12 +89,11 @@ export interface ScopedWork {
   depends_on: number[];
 }
 
-export type WorkItemCommand = { node_id?: number } & (
+export type WorkItemCommand = { type: 'close' } | ({ node_id: number } & (
+  | { type: 'start'; message?: string }
   | { type: 'messages'; message: string }
   | { type: 'approve'; pieces?: ScopedWork[] }
-  | { type: 'implement' }
-  | { type: 'close' }
   | { type: 'discover'; pieces: ScopedWork[] }
-  | { type: 'reopen'; node_id: number; note: string }
+  | { type: 'reopen'; note: string }
   | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null }
-);
+));

@@ -2,7 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
-from harness.graph.state import Node
+from harness.graph.state import Graph, Node
 from harness.graph.traverser import Outcome
 
 
@@ -23,19 +23,27 @@ class TechnicalPlanning:
         self.agents = agents
         self.progress = progress
 
-    def talk(self, node: Node, brief: str, message: str, worktree: Path) -> Outcome:
+    def start(self, graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
         data = node.data or {}
-        if node.conversation is None and data.get("previous_plan"):
+        goal = graph.node(data['goal_id'])
+        brief = (goal.data or {})['approved']
+        message = message or 'Draft the technical plan.'
+        if data.get("previous_plan"):
             message = f"Previous plan\n{data['previous_plan']}\n\nRevision request\n{message}"
-        prompt = f"Approved brief\n{brief}\n\nRequest\n{message}"
+        return self._turn(node, f"Approved brief\n{brief}\n\nRequest\n{message}", worktree)
+
+    def follow_up(self, _graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
+        return self._turn(node, message, worktree)
+
+    def _turn(self, node: Node, message: str, worktree: Path) -> Outcome:
         model = self.agents.model
         result = self.agents.run_turn(
-            prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
+            message, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
             node_id=node.id, progress=self.progress,
         )
         node.model = model
         node.conversation = result.conversation
         if result.paused:
             return Outcome("paused")
-        node.data = {**data, "draft": result.output}
+        node.data = {**(node.data or {}), "draft": result.output}
         return Outcome("reply")

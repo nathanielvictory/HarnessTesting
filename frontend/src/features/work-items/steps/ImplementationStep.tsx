@@ -15,7 +15,9 @@ export function ImplementationStep({ node, done, busy, links, perform, plan, fee
   const action = paused ? 'Resume implementation' : feedback ? 'Run with feedback' : 'Run implementation';
 
   return <StepPane title="Implementation" actions={!done &&
-    <button className="primary" disabled={busy} onClick={() => perform({ type: 'implement' })}>{action}</button>
+    <button className="primary" disabled={busy} onClick={() => perform(node.conversation_started
+      ? { type: 'messages', node_id: node.id, message: feedback || 'Continue the interrupted implementation.' }
+      : { type: 'start', node_id: node.id })}>{action}</button>
   }>
     {!done && !busy && <div className="step-state">
       <h4>{paused ? 'Implementation paused' : feedback ? 'Ready to apply feedback' : 'Ready to implement'}</h4>

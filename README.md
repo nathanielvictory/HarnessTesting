@@ -67,6 +67,10 @@ codex mcp add harness --url http://127.0.0.1:8000/mcp
 ```
 
 The MCP tools inspect and act on the same projects and work items as the web app.
+Use `inspect_work_item` to find the ready node's ID and whether it has a saved
+conversation. Pass the node ID to `start_node` for its first turn or to
+`send_message` for a follow-up. Approval, discovery, and review also require a
+node ID.
 
 ## Use the terminal interface
 

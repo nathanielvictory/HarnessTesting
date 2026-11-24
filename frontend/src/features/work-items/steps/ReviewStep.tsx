@@ -39,7 +39,7 @@ export function ReviewStep({ target, node, done, busy, links, perform, earlier }
     event.preventDefault();
     if (decision) {
       perform(
-        { type: 'review', decision, note, earlier_id: decision === 'review_earlier' ? earlierId : null },
+        { type: 'review', node_id: node.id, decision, note, earlier_id: decision === 'review_earlier' ? earlierId : null },
         () => saveDraft({ text: '' }),
       );
     }

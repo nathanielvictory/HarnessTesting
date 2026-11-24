@@ -69,43 +69,37 @@ class Harness:
         project, item = self.catalog.get_work_item(item_id)
         graph = self.graphs.load(item_id)
         ready = graph.current_nodes() if item.status is not WorkItemStatus.COMPLETE else []
-        current = ready[0] if ready else None
         entry = graph.nodes.get(graph.entry_node_id)
         return {
             "project": asdict(project),
             "work_item": asdict(item),
             "entry_node_id": graph.entry_node_id,
-            "current_node_id": current.id if current else None,
             "ready_node_ids": [node.id for node in ready],
             "blocked": {node.id: reasons for node in graph.nodes.values() if node.status == 'pending'
                         and (reasons := graph.blockers(node))},
             "result_commit": entry.workflow.get('result_commit') if entry else None,
             "nodes": [_node_view(graph, node) for node in sorted(graph.nodes.values(), key=lambda node: node.id)],
             "transitions": [asdict(edge) for edge in graph.history()],
-            "review": _review_view(graph, current),
             "reviews": {node.id: _review_view(graph, node) for node in ready if node.node_type == NodeType.HUMAN_REVIEW},
         }
 
-    def talk(self, item_id: int, message: str, node_id: int | None = None) -> dict[str, Any]:
-        if not message.strip():
-            raise ValueError("Enter a message.")
-        return self._advance(item_id, "Preparing a reply", lambda work: work.talk(message.strip(), node_id))
+    def start(self, item_id: int, node_id: int, message: str = '') -> dict[str, Any]:
+        return self._advance(item_id, "Starting the node", lambda work: work.start(node_id, message))
 
-    def approve(self, item_id: int, node_id: int | None = None, pieces: list[ScopedWork] | None = None) -> dict[str, Any]:
+    def follow_up(self, item_id: int, node_id: int, message: str) -> dict[str, Any]:
+        return self._advance(item_id, "Preparing a reply", lambda work: work.follow_up(node_id, message))
+
+    def approve(self, item_id: int, node_id: int, pieces: list[ScopedWork] | None = None) -> dict[str, Any]:
         return self._advance(item_id, "Saving approval", lambda work: work.approve(node_id, pieces))
 
-    def implement(self, item_id: int, node_id: int | None = None) -> dict[str, Any]:
-        return self._advance(item_id, "Implementing the plan", lambda work: work.implement(node_id))
-
-    def discover(self, item_id: int, pieces: list[ScopedWork], node_id: int | None = None) -> dict[str, Any]:
+    def discover(self, item_id: int, pieces: list[ScopedWork], node_id: int) -> dict[str, Any]:
         return self._advance(item_id, "Adding prerequisites", lambda work: work.discover(pieces, node_id))
 
     def reopen(self, item_id: int, node_id: int, note: str) -> dict[str, Any]:
         return self._advance(item_id, "Reopening the selected step", lambda work: work.reopen(node_id, note))
 
     def review(
-        self, item_id: int, decision: ReviewDecision, note: str = "", earlier_id: int | None = None,
-        node_id: int | None = None,
+        self, item_id: int, node_id: int, decision: ReviewDecision, note: str = "", earlier_id: int | None = None,
     ) -> dict[str, Any]:
         if decision in (ReviewDecision.FEEDBACK, ReviewDecision.REVISE) and not note.strip():
             raise ValueError("Describe what should change.")
@@ -230,6 +224,7 @@ def _node_view(graph: Graph, node: Node) -> dict[str, Any]:
         "id": node.id, "node_type": node.node_type, "model": node.model,
         "branch_ref": node.branch_ref, "commit_sha": node.commit_sha,
         "data": node.data, "messages": messages, "status": node.status,
+        "conversation_started": node.conversation is not None,
         "scope_id": graph.scope(node),
         "scope_brief": (graph.node(graph.scope(node)).data or {}).get('scope_brief'),
     }

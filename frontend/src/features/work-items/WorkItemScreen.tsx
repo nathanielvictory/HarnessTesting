@@ -23,8 +23,9 @@ export function WorkItemScreen({ detail, busy, perform }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [readySelection, setReadySelection] = useState<number | null>(null);
   const done = detail.work_item.status === 'complete';
+  const readyIds = detail.ready_node_ids;
   const currentId = done ? detail.transitions.at(-1)?.to_node_id ?? detail.entry_node_id
-    : readySelection !== null && detail.ready_node_ids.includes(readySelection) ? readySelection : detail.current_node_id;
+    : readySelection !== null && readyIds.includes(readySelection) ? readySelection : readyIds.length === 1 ? readyIds[0] : undefined;
   const current = detail.nodes.find(node => node.id === currentId);
   const historical = detail.nodes.find(node => node.id === historyId);
   const showingHistory = historical && historical.id !== current?.id;
@@ -42,6 +43,7 @@ export function WorkItemScreen({ detail, busy, perform }: Props) {
     <div className="step-slot">
       {!done && detail.ready_node_ids.length > 1 && <label className="ready-step">Ready step <select disabled={busy}
         value={currentId ?? ''} onChange={event => { setReadySelection(Number(event.target.value)); setHistoryId(null); }}>
+        <option value="" disabled>Choose a ready step</option>
         {detail.ready_node_ids.map(id => <option key={id} value={id}>{stepLabel(detail, id)}</option>)}
       </select></label>}
       {showingHistory && <StepPane key={historical.id} title={nodeLabel(historical)}
@@ -53,13 +55,18 @@ export function WorkItemScreen({ detail, busy, perform }: Props) {
           <ImplementationChanges itemId={links.itemId} nodeId={historical.id} />}
       </StepPane>}
       <div className="step-slot" hidden={showingHistory}>
-        {current ? <CurrentStep key={current.id} node={current} detail={detail} busy={busy} links={links}
-          perform={(command, onSubmitted) => perform({ ...command, node_id: current.id }, onSubmitted)} /> :
-          <p className="empty">No steps are ready. Review the blockers and graph history.</p>}
+        {current ? <CurrentStep key={current.id} node={current} detail={detail} busy={busy} links={links} perform={perform} /> :
+          <p className="empty">{readyIds.length ? 'Choose the step you want to work on.'
+            : 'No steps are ready. Review the blockers and graph history.'}</p>}
       </div>
     </div>
     <GraphHistory detail={detail} selectedId={selectedNode?.id} expanded={historyOpen} selectNode={id => {
-      setHistoryId(id);
+      if (readyIds.includes(id)) {
+        setReadySelection(id);
+        setHistoryId(null);
+      } else {
+        setHistoryId(id);
+      }
       setHistoryOpen(false);
     }}>
       {!done && Object.keys(detail.blocked).length > 0 && <section className="frontier-sidebar" aria-label="Blocked steps">
@@ -162,7 +169,7 @@ function CurrentStep({ node, detail, busy, perform, links }: Props & { links: Re
       const plan = detail.nodes.find(candidate => candidate.id === node.data?.plan_id);
       const incoming = detail.transitions.at(-1);
       const feedback = incoming?.to_node_id === node.id && incoming.outcome === 'feedback' ? incoming.data?.note : undefined;
-      return <ImplementationStep {...step} plan={plan} feedback={typeof feedback === 'string' ? feedback : undefined} />;
+      return <ImplementationStep {...step} plan={plan} feedback={node.data?.feedback ?? (typeof feedback === 'string' ? feedback : undefined)} />;
     }
     default:
       return <StepPane title={nodeLabel(node)} followLatest>

@@ -33,7 +33,11 @@ class WorkItemRequest(BaseModel):
 
 
 class NodeRequest(BaseModel):
-    node_id: int | None = None
+    node_id: int
+
+
+class StartRequest(NodeRequest):
+    message: str = ""
 
 
 class MessageRequest(NodeRequest):
@@ -163,18 +167,17 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
     def close_work_item(item_id: int) -> dict:
         return harness.close_work_item(item_id)
 
+    @app.post("/api/work-items/{item_id}/start")
+    def start(item_id: int, body: StartRequest) -> dict:
+        return harness.start(item_id, body.node_id, body.message)
+
     @app.post("/api/work-items/{item_id}/messages")
-    def talk(item_id: int, body: MessageRequest) -> dict:
-        return harness.talk(item_id, body.message, body.node_id)
+    def follow_up(item_id: int, body: MessageRequest) -> dict:
+        return harness.follow_up(item_id, body.node_id, body.message)
 
     @app.post("/api/work-items/{item_id}/approve")
-    def approve(item_id: int, body: ApprovalRequest | None = None) -> dict:
-        body = body or ApprovalRequest()
+    def approve(item_id: int, body: ApprovalRequest) -> dict:
         return harness.approve(item_id, body.node_id, body.pieces)
-
-    @app.post("/api/work-items/{item_id}/implement")
-    def implement(item_id: int, body: NodeRequest | None = None) -> dict:
-        return harness.implement(item_id, body.node_id if body else None)
 
     @app.post('/api/work-items/{item_id}/discover')
     def discover(item_id: int, body: ScopedRequest) -> dict:
@@ -186,7 +189,7 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
 
     @app.post("/api/work-items/{item_id}/review")
     def review(item_id: int, body: ReviewRequest) -> dict:
-        return harness.review(item_id, body.decision, body.note, body.earlier_id, body.node_id)
+        return harness.review(item_id, body.node_id, body.decision, body.note, body.earlier_id)
 
     app.mount("/", mcp_app)
     return app

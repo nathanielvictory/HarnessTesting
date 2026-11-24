@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, TypeVar
@@ -56,10 +56,8 @@ class Traverser:
         self.apply = apply
         self.finalize = finalize
 
-    def advance(self, work_item_id: int, node_id: int | None = None) -> Step | None:
+    def advance(self, work_item_id: int, node_id: int) -> Step:
         original = self.store.load(work_item_id).select(node_id)
-        if original is None:
-            return None
         operation = self.operations.get(original.node_type)
         if operation is None:
             raise ValueError(f'No operation registered for {original.node_type!r}')
@@ -77,10 +75,3 @@ class Traverser:
             return Step(node, replace(outcome, complete=complete), edge)
 
         return self.store.edit(work_item_id, save)
-
-    def run(self, work_item_id: int, node_id: int | None = None) -> Iterator[Step]:
-        while (step := self.advance(work_item_id, node_id)) is not None:
-            yield step
-            if step.node.status == 'pending' or step.outcome.complete:
-                return
-            node_id = None

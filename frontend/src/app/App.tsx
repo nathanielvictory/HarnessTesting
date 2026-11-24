@@ -11,7 +11,6 @@ export function App() {
   const state = useWorkspace();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const busy = Boolean(state.busy);
-  const itemBusy = busy || Boolean(state.activity);
   const item = state.detail?.work_item;
 
   return (
@@ -27,14 +26,14 @@ export function App() {
           {state.project && <>
             <button popoverTarget="workspace-usage">Usage</button>
             <div className="toolbar-popover" id="workspace-usage" popover="auto">
-              {item && <UsageSummary key={`item-${item.id}`} scope="work-items" id={item.id} busy={itemBusy} />}
-              <UsageSummary key={`project-${state.project.id}`} scope="projects" id={state.project.id} busy={itemBusy} />
+              {item && <UsageSummary key={`item-${item.id}`} scope="work-items" id={item.id} busy={busy} />}
+              <UsageSummary key={`project-${state.project.id}`} scope="projects" id={state.project.id} busy={busy} />
             </div>
           </>}
           {item?.status === 'in_progress' && <>
             <button popoverTarget="workspace-item-actions" aria-label="Work item actions">More</button>
             <div className="toolbar-popover" id="workspace-item-actions" popover="auto">
-              <button disabled={itemBusy} onClick={event => {
+              <button disabled={busy} onClick={event => {
                 event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
                 state.perform({ type: 'close' });
               }}>Mark complete</button>
@@ -70,9 +69,9 @@ export function App() {
         </aside>
         <main className="main">
           {state.error && <p className="notice error" role="alert">{state.error}</p>}
-          {state.busy && !state.activity && <p className="notice" role="status">{state.busy}</p>}
+          {state.busy && <p className="notice" role="status">{state.busy}</p>}
           {state.detail
-            ? <WorkItemScreen key={state.detail.work_item.id} detail={state.detail} busy={itemBusy} activity={state.activity} perform={state.perform} />
+            ? <WorkItemScreen key={state.detail.work_item.id} detail={state.detail} busy={busy} perform={state.perform} />
             : <div className="empty">
               <h2>{state.project ? 'Open a work item' : 'Register a repository'}</h2>
               <p>{state.project

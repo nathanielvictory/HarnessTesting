@@ -63,16 +63,25 @@ export interface WorkItemDetail {
 
 export type ReviewDecision = 'accept' | 'feedback' | 'revise' | 'review_earlier' | 'return';
 
-export interface WorkItemActivity {
-  label: string;
-  tools: string[];
-}
-
 export interface ImplementationDiff {
   base_commit: string;
   commit: string;
-  patch: string;
-  truncated: boolean;
+  files: ChangedFile[];
+}
+
+export interface ChangedFile {
+  status: string;
+  old_path: string | null;
+  new_path: string | null;
+  old_mode: string;
+  new_mode: string;
+}
+
+export interface FileDiff {
+  binary: boolean;
+  patch?: string;
+  before?: string;
+  after?: string;
 }
 
 export interface ScopedWork {

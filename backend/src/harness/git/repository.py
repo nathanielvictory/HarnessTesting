@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -6,6 +7,17 @@ from tempfile import TemporaryDirectory
 
 class GitError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class FileChange:
+    status: str
+    old_path: str | None
+    new_path: str | None
+    old_mode: str
+    new_mode: str
+    old_object: str
+    new_object: str
 
 
 def _git(path: Path, *args: str) -> str:
@@ -77,10 +89,44 @@ class GitRepository:
             _git(worktree, "commit", "-m", message)
         return _git(worktree, "rev-parse", "HEAD").strip()
 
-    def diff(self, base: str, result: str, *, binary: bool = True) -> str:
-        options = ("--binary",) if binary else ()
-        return _git(self.path, "diff", *options, "--no-color", "--no-ext-diff", "--no-textconv",
-                    self.commit_sha(base), self.commit_sha(result), "--")
+    def changed_files(self, base: str, result: str) -> list[FileChange]:
+        raw = _git(self.path, "diff", "--raw", "-z", "--no-abbrev", "--find-renames", "--no-color", "--no-ext-diff",
+                   self.commit_sha(base), self.commit_sha(result), "--")
+        fields = iter(raw.split("\0")[:-1])
+        changes = []
+        for header in fields:
+            old_mode, new_mode, old_object, new_object, status = header[1:].split()
+            path = _json_text(next(fields))
+            new_path = _json_text(next(fields)) if status[0] in "RC" else path
+            changes.append(FileChange(
+                status[0],
+                None if status == "A" else path,
+                None if status == "D" else new_path,
+                old_mode, new_mode, old_object, new_object,
+            ))
+        return changes
+
+    def file_diff(self, change: FileChange) -> dict[str, str | bool]:
+        if change.old_path is not None and change.new_path is not None and "160000" not in (
+            change.old_mode, change.new_mode,
+        ):
+            patch = _git(self.path, "diff", "--patch", "--unified=3", "--no-color", "--no-ext-diff", "--no-textconv",
+                         change.old_object, change.new_object, "--")
+            binary = any(line.startswith("Binary files ") for line in patch.split("\n"))
+            return {"patch": _json_text(patch), "binary": binary}
+
+        before = self._diff_side(change.old_mode, change.old_object)
+        after = self._diff_side(change.new_mode, change.new_object)
+        if any("\0" in text or text != _json_text(text) for text in (before, after)):
+            return {"binary": True}
+        return {"before": before, "after": after, "binary": False}
+
+    def _diff_side(self, mode: str, object_id: str) -> str:
+        if mode == "000000":
+            return ""
+        if mode == "160000":
+            return f"Subproject commit {object_id}\n"
+        return _git(self.path, "cat-file", "blob", object_id)
 
     def read_text_file(self, revision: str, path: str) -> str:
         parts = path.split("/")
@@ -128,3 +174,6 @@ class GitRepository:
         if final:
             _git(self.path, 'update-ref', f'refs/harness/results/{item_id}', result)
         return result
+
+def _json_text(text: str) -> str:
+    return text.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")

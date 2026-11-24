@@ -1,18 +1,15 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Activity } from '../Activity';
-import type { WorkItemActivity } from '../types';
 
 interface Props {
   title: string;
   children: ReactNode;
   actions?: ReactNode;
-  activity?: WorkItemActivity | null;
   onReturn?: () => void;
   followLatest?: boolean;
 }
 
-export function StepPane({ title, children, actions, activity, onReturn, followLatest = false }: Props) {
+export function StepPane({ title, children, actions, onReturn, followLatest = false }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const following = useRef(followLatest);
@@ -70,9 +67,6 @@ export function StepPane({ title, children, actions, activity, onReturn, followL
       ref={viewportRef} onScroll={followLatest ? syncScrollPosition : undefined}>
       <div className="step-content" ref={contentRef}>{children}</div>
     </div>
-    {(actions || activity) && <footer className="step-footer">
-      <Activity activity={activity ?? null} />
-      {actions}
-    </footer>}
+    {actions && <footer className="step-footer">{actions}</footer>}
   </section>;
 }

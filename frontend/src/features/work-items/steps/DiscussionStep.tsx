@@ -4,10 +4,10 @@ import type { StepProps } from './types';
 import { StepPane } from './StepPane';
 import { useNodeDraft } from './useNodeDraft';
 
-export function DiscussionStep({ node, done, busy, activity, links, perform, alignment }: StepProps & { alignment: boolean }) {
+export function DiscussionStep({ node, done, busy, links, perform, alignment }: StepProps & { alignment: boolean }) {
   const [{ text: message }, saveDraft] = useNodeDraft(node.id);
 
-  return <StepPane title={nodeLabel(node)} activity={activity} followLatest actions={!done &&
+  return <StepPane title={nodeLabel(node)} followLatest actions={!done &&
     <form className="composer" onSubmit={event => {
       event.preventDefault();
       if (!busy && message.trim()) {

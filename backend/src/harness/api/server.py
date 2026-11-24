@@ -4,7 +4,7 @@ from html import escape
 
 import uvicorn
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from pydantic_ai.exceptions import AgentRunError, UserError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -155,9 +155,9 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
     def implementation_diff(item_id: int, node_id: int) -> dict:
         return harness.implementation_diff(item_id, node_id)
 
-    @app.get("/api/work-items/{item_id}/nodes/{node_id}/diff.patch", response_class=PlainTextResponse)
-    def full_implementation_diff(item_id: int, node_id: int) -> str:
-        return harness.implementation_diff(item_id, node_id, full=True)["patch"]
+    @app.get("/api/work-items/{item_id}/nodes/{node_id}/diff/files/{file_index}")
+    def implementation_file_diff(item_id: int, node_id: int, file_index: int, commit: str) -> dict:
+        return harness.implementation_file_diff(item_id, node_id, file_index, commit)
 
     @app.post("/api/work-items/{item_id}/close")
     def close_work_item(item_id: int) -> dict:

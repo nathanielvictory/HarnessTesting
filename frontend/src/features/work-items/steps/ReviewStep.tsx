@@ -4,7 +4,6 @@ import { nodeLabel } from '../labels';
 import { MessageMarkdown } from '../MessageMarkdown';
 import type { ReviewDecision, WorkNode } from '../types';
 import type { StepProps } from './types';
-import { StepPane } from './StepPane';
 import { useNodeDraft } from './useNodeDraft';
 
 const implementationChoices: { value: ReviewDecision; label: string }[] = [
@@ -24,7 +23,7 @@ interface Props extends StepProps {
   earlier: { id: number; label: string }[];
 }
 
-export function ReviewStep({ target, node, done, busy, activity, links, perform, earlier }: Props) {
+export function ReviewStep({ target, node, done, busy, links, perform, earlier }: Props) {
   const [{ text: note, reviewDecision }, saveDraft] = useNodeDraft(node.id);
   const choices = target.node_type === 'implementation'
     ? implementationChoices.filter(choice => choice.value !== 'review_earlier' || earlier.length > 0)
@@ -32,10 +31,11 @@ export function ReviewStep({ target, node, done, busy, activity, links, perform,
   const [decision, setDecision] = useState<ReviewDecision | ''>(() => choices.find(choice => choice.value === reviewDecision)?.value ?? '');
   const [earlierId, setEarlierId] = useState(earlier[0]?.id ?? null);
   const needsNote = decision === 'feedback' || decision === 'revise';
+  const isImplementation = target.node_type === 'implementation';
   const summary = target.data?.summary || target.data?.approved;
   const commit = node.data?.last_decision?.reviewed_commit_sha || target.commit_sha;
 
-  const actions = !done && !activity && <form className="review-form" onSubmit={event => {
+  const actions = !done && !busy && <form className="review-form" onSubmit={event => {
     event.preventDefault();
     if (decision) {
       perform(
@@ -61,22 +61,37 @@ export function ReviewStep({ target, node, done, busy, activity, links, perform,
         {earlier.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
       </select>
     </label>}
-    <div><button className="primary" disabled={busy || !decision || (needsNote && !note.trim())}>
+    <div><button className="primary" disabled={!decision || (needsNote && !note.trim())}>
       Record decision
     </button></div>
   </form>;
 
-  return <StepPane title={`Review ${nodeLabel(target).toLowerCase()}`} activity={activity} actions={actions}>
-    {target.node_type === 'implementation' && target.branch_ref && <dl className="revision">
-      <div><dt>Branch</dt><dd><code>{target.branch_ref.replace(/^refs\/heads\//, '')}</code></dd></div>
-      {commit && <div><dt>Commit</dt><dd><code>{commit}</code></dd></div>}
-    </dl>}
-    {summary && <section className="step-section">
-      <h4>{target.node_type === 'implementation' ? 'Implementation summary' : 'Approved draft'}</h4>
+  const implementationDetails = <>
+    {target.branch_ref && <p className="muted">Branch <code>{target.branch_ref.replace(/^refs\/heads\//, '')}</code></p>}
+    {summary && <details className="step-disclosure">
+      <summary>Implementation summary</summary>
       <MessageMarkdown text={summary} links={links} nodeId={target.id} />
-    </section>}
-    {target.node_type === 'implementation' && (commit
-      ? <ImplementationChanges key={commit} itemId={links.itemId} nodeId={node.id} />
-      : <p className="muted">This implementation has no saved commit to compare.</p>)}
-  </StepPane>;
+    </details>}
+    {actions}
+  </>;
+
+  const title = `Review ${nodeLabel(target).toLowerCase()}`;
+  return <section className="step-pane" aria-label={title}>
+    <div className="step-scroll" tabIndex={0} role="region" aria-label="Review content">
+      <div className="step-content">
+        {isImplementation ? (commit
+          ? <ImplementationChanges key={commit} itemId={links.itemId} nodeId={node.id}>
+            {implementationDetails}
+          </ImplementationChanges>
+          : <>
+            <p className="muted">This implementation has no saved commit to compare.</p>
+            {implementationDetails}
+          </>) : <>
+            <h3>{title}</h3>
+            {summary && <MessageMarkdown text={summary} links={links} nodeId={target.id} />}
+            {actions}
+          </>}
+      </div>
+    </div>
+  </section>;
 }

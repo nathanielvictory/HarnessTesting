@@ -142,7 +142,25 @@ class Harness:
             raise LookupError("This step has no saved repository snapshot.")
         return GitRepository(Path(project.repository_path)).read_text_file(revision, path)
 
-    def implementation_diff(self, item_id: int, node_id: int, *, full: bool = False) -> dict[str, Any]:
+    def implementation_diff(self, item_id: int, node_id: int) -> dict[str, Any]:
+        repository, base, commit = self._implementation_comparison(item_id, node_id)
+        files = [
+            {"status": change.status, "old_path": change.old_path, "new_path": change.new_path,
+             "old_mode": change.old_mode, "new_mode": change.new_mode}
+            for change in repository.changed_files(base, commit)
+        ]
+        return {"base_commit": base, "commit": commit, "files": files}
+
+    def implementation_file_diff(self, item_id: int, node_id: int, file_index: int, commit: str) -> dict[str, str | bool]:
+        repository, base, saved_commit = self._implementation_comparison(item_id, node_id)
+        if commit != saved_commit:
+            raise WorkItemConflict("The saved comparison changed. Reopen the work item to load it.")
+        changes = repository.changed_files(base, saved_commit)
+        if not 0 <= file_index < len(changes):
+            raise LookupError("This file is absent from the saved comparison.")
+        return repository.file_diff(changes[file_index])
+
+    def _implementation_comparison(self, item_id: int, node_id: int) -> tuple[GitRepository, str, str]:
         project, _ = self.catalog.get_work_item(item_id)
         graph = self.graphs.load(item_id)
         node = graph.nodes.get(node_id)
@@ -163,18 +181,7 @@ class Harness:
         if not base or not commit:
             raise LookupError("This implementation has no saved comparison yet.")
 
-        repository = GitRepository(Path(project.repository_path))
-        patch = repository.diff(base, commit, binary=False).encode("utf-8", errors="replace")
-        if full:
-            return {"base_commit": base, "commit": commit, "patch": patch.decode("utf-8"), "truncated": False}
-        byte_limit, line_limit = 64 * 1024, 1500
-        lines = patch[:byte_limit].decode("utf-8", errors="ignore").splitlines(keepends=True)
-        return {
-            "base_commit": base,
-            "commit": commit,
-            "patch": "".join(lines[:line_limit]),
-            "truncated": len(patch) > byte_limit or len(lines) > line_limit,
-        }
+        return GitRepository(Path(project.repository_path)), base, commit
 
     @contextmanager
     def _item_operation(self, item_id: int, label: str):

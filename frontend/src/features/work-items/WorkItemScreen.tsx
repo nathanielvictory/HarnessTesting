@@ -9,17 +9,16 @@ import { ImplementationStep } from './steps/ImplementationStep';
 import { ReviewStep } from './steps/ReviewStep';
 import { StepPane } from './steps/StepPane';
 import type { PerformCommand } from './steps/types';
-import type { ScopedWork, WorkItemActivity, WorkItemDetail, WorkNode } from './types';
+import type { ScopedWork, WorkItemDetail, WorkNode } from './types';
 import './work-item.css';
 
 interface Props {
   detail: WorkItemDetail;
   busy: boolean;
-  activity: WorkItemActivity | null;
   perform: PerformCommand;
 }
 
-export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
+export function WorkItemScreen({ detail, busy, perform }: Props) {
   const [historyId, setHistoryId] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [readySelection, setReadySelection] = useState<number | null>(null);
@@ -45,7 +44,7 @@ export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
         value={currentId ?? ''} onChange={event => { setReadySelection(Number(event.target.value)); setHistoryId(null); }}>
         {detail.ready_node_ids.map(id => <option key={id} value={id}>{stepLabel(detail, id)}</option>)}
       </select></label>}
-      {showingHistory && <StepPane key={historical.id} title={nodeLabel(historical)} activity={activity}
+      {showingHistory && <StepPane key={historical.id} title={nodeLabel(historical)}
         onReturn={() => setHistoryId(null)}>
         <Conversation node={historical} links={links} />
         {historical.node_type === 'implementation' && historical.commit_sha &&
@@ -54,7 +53,7 @@ export function WorkItemScreen({ detail, busy, activity, perform }: Props) {
           <ImplementationChanges itemId={links.itemId} nodeId={historical.id} />}
       </StepPane>}
       <div className="step-slot" hidden={showingHistory}>
-        {current ? <CurrentStep key={current.id} node={current} detail={detail} busy={busy} activity={activity} links={links}
+        {current ? <CurrentStep key={current.id} node={current} detail={detail} busy={busy} links={links}
           perform={(command, onSubmitted) => perform({ ...command, node_id: current.id }, onSubmitted)} /> :
           <p className="empty">No steps are ready. Review the blockers and graph history.</p>}
       </div>
@@ -140,9 +139,9 @@ function ReopenForm({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & {
   </details>;
 }
 
-function CurrentStep({ node, detail, busy, activity, perform, links }: Props & { links: RepositoryLinks; node: WorkNode }) {
+function CurrentStep({ node, detail, busy, perform, links }: Props & { links: RepositoryLinks; node: WorkNode }) {
   const done = detail.work_item.status === 'complete';
-  const step = { node, done, busy, activity, perform, links };
+  const step = { node, done, busy, perform, links };
 
   const review = detail.reviews[node.id];
   const targetId = review?.target_id ?? node.data?.target_id;
@@ -166,7 +165,7 @@ function CurrentStep({ node, detail, busy, activity, perform, links }: Props & {
       return <ImplementationStep {...step} plan={plan} feedback={typeof feedback === 'string' ? feedback : undefined} />;
     }
     default:
-      return <StepPane title={nodeLabel(node)} activity={activity} followLatest>
+      return <StepPane title={nodeLabel(node)} followLatest>
         <Conversation node={node} links={links} />
       </StepPane>;
   }

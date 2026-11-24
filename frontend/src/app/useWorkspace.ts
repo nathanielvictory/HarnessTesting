@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { errorMessage } from '../api/request';
 import { listProjects, registerProject } from '../features/projects/api';
 import type { NewProject, Project } from '../features/projects/api';
-import { createWorkItem, getWorkItem, getWorkItemActivity, listWorkItems, performWorkItemCommand } from '../features/work-items/api';
-import type { WorkItem, WorkItemActivity, WorkItemCommand, WorkItemDetail, WorkItemStatus } from '../features/work-items/types';
+import { createWorkItem, getWorkItem, listWorkItems, performWorkItemCommand } from '../features/work-items/api';
+import type { WorkItem, WorkItemCommand, WorkItemDetail, WorkItemStatus } from '../features/work-items/types';
 
 export function useWorkspace() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -13,12 +13,8 @@ export function useWorkspace() {
   const [listRevision, setListRevision] = useState(0);
   const [detail, setDetail] = useState<WorkItemDetail | null>(null);
   const [busy, setBusy] = useState('Loading projects…');
-  const [pending, setPending] = useState<{ id: number; label: string } | null>(null);
-  const [observedActivity, setObservedActivity] = useState<{ id: number; activity: WorkItemActivity } | null>(null);
   const [error, setError] = useState('');
   const [form, setForm] = useState<'project' | 'item' | null>(null);
-  const openItemId = detail?.work_item.id;
-  const itemComplete = detail?.work_item.status === 'complete';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,46 +43,6 @@ export function useWorkspace() {
     });
     return () => controller.abort();
   }, [projectId, filter, listRevision]);
-
-  useEffect(() => {
-    if (openItemId === undefined || itemComplete) return;
-    const controller = new AbortController();
-    const { signal } = controller;
-    let timer: number | undefined;
-    let refreshDetail = !pending;
-
-    async function poll(id: number) {
-      let active = false;
-      try {
-        const current = await getWorkItemActivity(id, signal);
-        if (signal.aborted) return;
-        active = Boolean(current);
-        if (current) {
-          refreshDetail = !pending;
-          setObservedActivity({ id, activity: current });
-        } else {
-          if (refreshDetail) {
-            const updated = await getWorkItem(id, signal);
-            if (signal.aborted) return;
-            setDetail(previous => previous?.work_item.id === id ? updated : previous);
-            if (updated.work_item.status === 'complete') setListRevision(revision => revision + 1);
-            refreshDetail = false;
-          }
-          setObservedActivity(null);
-        }
-      } catch {
-        // A failed background poll can be retried without interrupting the open item.
-      } finally {
-        if (!signal.aborted) timer = window.setTimeout(() => void poll(id), pending || active ? 500 : 2000);
-      }
-    }
-
-    void poll(openItemId);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [openItemId, itemComplete, pending]);
 
   async function run(label: string, action: () => Promise<void>) {
     setBusy(label);
@@ -145,39 +101,29 @@ export function useWorkspace() {
   function perform(command: WorkItemCommand, onSubmitted?: () => void) {
     if (!detail) return;
     const id = detail.work_item.id;
-    function execute(step: WorkItemCommand, current: WorkItemDetail) {
-      setObservedActivity(null);
-      setPending({ id, label: commandLabel(step, current) });
-      return performWorkItemCommand(id, step);
-    }
-    const initial = detail;
-    return run(commandLabel(command, initial), async () => {
-      try {
-        let updated = await execute(command, initial);
-        onSubmitted?.();
+    return run(commandLabel(command, detail), async () => {
+      let updated = await performWorkItemCommand(id, command);
+      onSubmitted?.();
+      setDetail(updated);
+
+      const next = (command.type === 'approve' || command.type === 'review') &&
+        followUpCommand(detail, updated, command.node_id ?? detail.current_node_id);
+      if (next) {
+        setBusy(commandLabel(next, updated));
+        updated = await performWorkItemCommand(id, next);
         setDetail(updated);
-        if (command.type === 'approve' || command.type === 'review') {
-          const next = followUpCommand(initial, updated, command.node_id ?? initial.current_node_id);
-          if (next) {
-            updated = await execute(next, updated);
-            setDetail(updated);
-          }
-        }
-        if (updated.work_item.status === 'complete') {
-          if (command.type === 'close') selectFilter('complete');
+      }
+
+      if (updated.work_item.status === 'complete') {
+        if (command.type === 'close') selectFilter('complete');
           setListRevision(revision => revision + 1);
-        }
-      } finally {
-        setPending(null);
       }
     });
   }
 
-  const liveActivity = observedActivity && observedActivity.id === openItemId ? observedActivity.activity : null;
-  const activity = pending ? { label: pending.label, tools: liveActivity?.tools ?? [] } : liveActivity ?? null;
   return {
     projects, project: projects.find(project => project.id === projectId), projectId,
-    filter, items, detail, busy, error, form, activity,
+    filter, items, detail, busy, error, form,
     selectProject, selectFilter, toggleForm, register, createItem, openItem, perform,
   };
 }
@@ -198,12 +144,12 @@ function commandLabel(command: WorkItemCommand, detail: WorkItemDetail) {
 
 // Preserve the existing automatic follow-up after a browser approval or review.
 function followUpCommand(before: WorkItemDetail, detail: WorkItemDetail, source: number | null): WorkItemCommand | undefined {
-  if (before.ready_node_ids.length !== 1 || detail.ready_node_ids.length !== 1) return;
+  if (detail.work_item.status === 'complete' || before.ready_node_ids.length !== 1 || detail.ready_node_ids.length !== 1) return;
   const current = detail.nodes.find(node => node.id === detail.current_node_id);
   if (!current || !detail.transitions.slice(before.transitions.length).some(edge =>
     edge.from_node_id === source && edge.to_node_id === current.id && edge.outcome !== 'delegated')) return;
   if (current.node_type === 'implementation') return { type: 'implement', node_id: current.id };
-  if (current?.node_type === 'technical_planning' && !current.messages.length) {
+  if (current.node_type === 'technical_planning' && !current.messages.length) {
     return { type: 'messages', node_id: current.id, message: current.data?.revision_note || 'Draft the technical plan.' };
   }
 }

@@ -72,18 +72,7 @@ conversation. Pass the node ID to `start_node` for its first turn or to
 `send_message` for a follow-up. Approval, discovery, and review also require a
 node ID.
 
-## Use the terminal interface
-
-From `backend/`, run `uv run --locked harness`. During alignment and planning,
-use `/approve` to accept the displayed draft. `/graph` shows the saved graph and
-`/quit` closes the harness. During an agent turn, press `G` to view the graph or
-`Q` to save and quit.
-
-Review shows the implementation branch and commit. Accepting completes the
-work item and leaves its branch available for integration. Feedback resumes
-the same worker conversation. Revising the plan starts a fresh implementation
-branch from the plan's base commit. Earlier-step review lets you revisit an
-approved plan or brief.
+## Inspect a work item checkout
 
 To inspect the implementation branch in your IDE, open the work item's existing
 checkout under `worktrees/items/<work-item-id>` in the Harness state directory.

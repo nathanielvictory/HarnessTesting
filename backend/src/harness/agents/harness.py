@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic_ai import Agent, CancellationToken, RunContext, capture_run_conversation
+from pydantic_ai import Agent, RunContext, capture_run_conversation
 from pydantic_ai.capabilities import AgentCapability, LocalWorkspace, WindowsWorkspace
 from pydantic_ai.conversation import ConversationTypeAdapter
 from pydantic_ai.exceptions import RunCancelled
@@ -50,7 +50,6 @@ class AgentHarness:
         conversation: dict[str, Any] | None = None,
         worktree: Path | None = None,
         progress: Callable[[str], None] | None = None,
-        cancellation_token: CancellationToken | None = None,
     ) -> AgentTurn:
         prior = ConversationTypeAdapter.validate_python(conversation) if conversation is not None else None
         capabilities = list(profile.capabilities)
@@ -95,7 +94,7 @@ class AgentHarness:
         with capture_run_conversation() as captured:
             try:
                 result = agent.run_sync(
-                    prompt, conversation=prior, workspace=workspace_override, cancellation_token=cancellation_token,
+                    prompt, conversation=prior, workspace=workspace_override,
                     event_stream_handler=report if progress is not None else None,
                 )
             except RunCancelled:

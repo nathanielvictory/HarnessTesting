@@ -114,7 +114,7 @@ class FrontierTest(unittest.TestCase):
         self.write_turn('implementation.txt', 'updated version')
         next_review = self.work.follow_up(follow_up, 'Adjust the result').edge.to_node_id
         self.assertEqual(self.agent.prompts[-1], 'Adjust the result')
-        self.assertEqual(self.work.review_target(next_review).id, follow_up)
+        self.assertEqual(self.work.graph().node(next_review).data['target_id'], follow_up)
 
     def test_ordered_pieces_and_interrupted_implementation(self):
         plan = self.plan()

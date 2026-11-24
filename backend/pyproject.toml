@@ -13,7 +13,6 @@ dependencies = [
 ]
 
 [project.scripts]
-harness = "harness.cli:main"
 harness-api = "harness.api.server:main"
 
 [build-system]

@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 
 from harness.graph.state import Edge, Graph, Node
 from harness.graph.traverser import NewNode
+from harness.operations.alignment import GoalAlignment
+from harness.operations.implementation import Implementation
+from harness.operations.planning import TechnicalPlanning
 
 from ..database import Database
 from ..models import Edge as EdgeRecord
@@ -13,6 +16,11 @@ from ..models import Node as NodeRecord
 from ..models import NodeType, WorkItem, WorkItemStatus
 
 T = TypeVar('T')
+NODE_CLASSES = {
+    NodeType.GOAL_ALIGNMENT: GoalAlignment,
+    NodeType.TECHNICAL_PLANNING: TechnicalPlanning,
+    NodeType.IMPLEMENTATION: Implementation,
+}
 
 
 class GraphEdit:
@@ -25,8 +33,10 @@ class GraphEdit:
         record = NodeRecord(work_item=self.item, node_type=NodeType(target.node_type))
         self.session.add(record)
         self.session.flush()
-        node = Node(record.id, target.node_type, conversation=target.conversation,
-                    branch_ref=target.branch_ref, commit_sha=target.commit_sha, data=target.data)
+        node = NODE_CLASSES.get(record.node_type, Node)(
+            record.id, target.node_type, conversation=target.conversation,
+            branch_ref=target.branch_ref, commit_sha=target.commit_sha, data=target.data,
+        )
         node.update_workflow(status='pending')
         self.graph.nodes[node.id] = node
         return node
@@ -88,7 +98,7 @@ def _load_graph(session: Session, item: WorkItem) -> Graph:
                             .where(NodeRecord.work_item_id == item.id).order_by(EdgeRecord.id))
     return Graph(
         item.entry_node_id,
-        [Node(row.id, row.node_type.value, row.model, row.conversation, row.branch_ref, row.commit_sha, row.data)
-         for row in item.nodes],
+        [NODE_CLASSES.get(row.node_type, Node)(row.id, row.node_type.value, row.model, row.conversation,
+                                              row.branch_ref, row.commit_sha, row.data) for row in item.nodes],
         [Edge(row.from_node_id, row.to_node_id, row.outbound_order, row.outcome, row.data) for row in edges],
     )

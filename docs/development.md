@@ -6,7 +6,7 @@ Follow the [glossary](glossary.md) in code, prompts, UI labels, and docs. When a
 
 | Location | Responsibility |
 | --- | --- |
-| `backend/src/harness/api/` and `cli/` | Adapt HTTP, MCP, and terminal interactions to application operations. Keep interface-specific formatting and interaction here. |
+| `backend/src/harness/api/` | Adapt HTTP and MCP interactions to application operations. Keep interface-specific formatting and interaction here. |
 | `backend/src/harness/graph/` | Represent the graph, reconstruct its history, and traverse it. |
 | `backend/src/harness/operations/` | Define what nodes do, assemble their instructions and inputs, and coordinate transitions for a work item. |
 | `backend/src/harness/persistence/` | Define SQLAlchemy models and map stored state to and from application objects. |

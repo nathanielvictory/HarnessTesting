@@ -3,9 +3,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from harness.agents.harness import AgentHarness, AgentProfile
-from harness.git.repository import GitRepository
-from harness.graph.state import Graph, Node
-from harness.graph.traverser import Outcome
+from harness.graph.state import Edge, Graph, Node
+from harness.graph.traverser import Edit, NewNode, Outcome
 
 
 PROFILE = AgentProfile(
@@ -20,16 +19,10 @@ PROFILE = AgentProfile(
 )
 
 
-class Implementation:
-    def __init__(self, repository: GitRepository, agents: AgentHarness, commit_message: str, *,
-                 progress: Callable[[str], None] | None = None) -> None:
-        self.repository = repository
-        self.agents = agents
-        self.commit_message = commit_message
-        self.progress = progress
-
-    def start(self, graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
-        data = node.data or {}
+class Implementation(Node):
+    def init(self, graph: Graph, message: str, worktree: Path, agents: AgentHarness,
+             save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
+        data = self.data or {}
         plan = graph.node(data['plan_id'])
         plan_data = plan.data or {}
         goal = graph.node(plan_data['goal_id'])
@@ -41,31 +34,33 @@ class Implementation:
             prompt += "\n\nContinue the interrupted implementation from the saved checkout."
         feedback = data.get('feedback') or next((
             (edge.data or {}).get('note') for edge in reversed(graph.history())
-            if edge.to_node_id == node.id and edge.outcome == 'feedback'
+            if edge.to_node_id == self.id and edge.outcome == 'feedback'
         ), None)
         if feedback:
             prompt += f"\n\nReview feedback\n{feedback}"
         if message and message != feedback:
             prompt += f"\n\nRequest\n{message}"
-        return self._turn(node, prompt, worktree)
+        return self._turn(prompt, worktree, agents, save_commit, progress)
 
-    def follow_up(self, _graph: Graph, node: Node, message: str, worktree: Path) -> Outcome:
-        return self._turn(node, message, worktree)
+    def follow_up(self, _graph: Graph, message: str, worktree: Path, agents: AgentHarness,
+                  save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
+        return self._turn(message, worktree, agents, save_commit, progress)
 
-    def _turn(self, node: Node, prompt: str, worktree: Path) -> Outcome:
-        model = self.agents.model
-        data = node.data or {}
-        result = self.agents.run_turn(
-            prompt, profile=PROFILE, model=model, conversation=node.conversation, worktree=worktree,
-            node_id=node.id, progress=self.progress,
+    def _turn(self, prompt: str, worktree: Path, agents: AgentHarness, save_commit: Callable[[Path], str],
+              progress: Callable[[str], None] | None) -> Outcome:
+        model = agents.model
+        data = self.data or {}
+        result = agents.run_turn(
+            prompt, profile=PROFILE, model=model, conversation=self.conversation, worktree=worktree,
+            node_id=self.id, progress=progress,
         )
-        node.commit_sha = self.repository.save_commit(worktree, self.commit_message)
-        node.model = model
-        node.conversation = result.conversation
+        self.commit_sha = save_commit(worktree)
+        self.model = model
+        self.conversation = result.conversation
         if result.paused:
-            node.data = {**data, "paused": True}
+            self.data = {**data, "paused": True}
             return Outcome("paused")
-        node.data = {**data, "paused": False, "summary": result.output}
+        self.data = {**data, "paused": False, "summary": result.output}
         _, _, last_line = result.output.rstrip().rpartition('\n')
         if last_line.startswith('PREREQUISITES:'):
             try:
@@ -75,3 +70,15 @@ class Implementation:
             if isinstance(briefs, list) and briefs and all(isinstance(brief, str) and brief.strip() for brief in briefs):
                 return Outcome('blocked', {'briefs': briefs})
         return Outcome("review")
+
+    def apply_turn(self, edit: Edit, outcome: Outcome, suspend: Callable[[Edit, Node, list[str]], Edge],
+                   successor: Callable[[Edit, Node, NewNode, Outcome], Edge]) -> Edge | None:
+        if outcome.name == 'blocked':
+            return suspend(edit, self, outcome.data['briefs'])
+        if outcome.name == 'review':
+            return successor(edit, self, NewNode('human_review', {'target_id': self.id}), outcome)
+        return None
+
+    def continuation(self) -> NewNode:
+        return NewNode(self.node_type, {**(self.data or {}), 'paused': True}, commit_sha=self.commit_sha,
+                       conversation=self.conversation)

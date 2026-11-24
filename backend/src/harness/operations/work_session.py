@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from harness.agents.harness import AgentHarness
@@ -9,9 +10,6 @@ from harness.graph.traverser import Edit, NewNode, Outcome, Step, Traverser
 from harness.persistence.graph.repository import GraphRepository
 from harness.persistence.models import NodeType
 
-from .alignment import GoalAlignment
-from .implementation import Implementation
-from .planning import TechnicalPlanning
 from .review import ReviewDecision, record_review
 
 
@@ -30,12 +28,9 @@ class WorkSession:
         self.store = store
         self.repository = repository
         self.worktrees = worktrees
-        self.agents = {
-            NodeType.GOAL_ALIGNMENT: GoalAlignment(agents, progress=progress),
-            NodeType.TECHNICAL_PLANNING: TechnicalPlanning(agents, progress=progress),
-            NodeType.IMPLEMENTATION: Implementation(repository, agents, title or f'Work item {item_id}',
-                                                    progress=progress),
-        }
+        self.agents = agents
+        self.progress = progress
+        self.save_commit = partial(repository.save_commit, message=title or f'Work item {item_id}')
 
     def graph(self) -> Graph:
         return self.store.load(self.item_id)
@@ -50,57 +45,52 @@ class WorkSession:
 
     def approve(self, node_id: int, pieces: list[ScopedWork] | None = None) -> Step:
         graph, node = self._current(node_id)
-        draft = _data(node).get('draft')
-        if not draft:
-            raise ValueError('There is no draft to approve yet.')
-        if pieces is not None and node.node_type != NodeType.TECHNICAL_PLANNING:
-            raise ValueError('Only an approved plan can delegate its implementation to scoped pieces.')
-        match node.node_type:
-            case NodeType.GOAL_ALIGNMENT:
-                destination = NewNode(NodeType.TECHNICAL_PLANNING, {'goal_id': node.id})
-            case NodeType.TECHNICAL_PLANNING:
-                destination = NewNode(NodeType.IMPLEMENTATION, {'plan_id': node.id})
-            case _:
-                raise ValueError('Only goal alignment and planning have drafts to approve.')
+        destination: NewNode | None = None
 
-        def approve_draft(current: Node) -> Outcome:
-            current.data = {**_data(current), 'approved': draft, 'base_commit': self._base(graph, current)}
+        def confirm(current: Node) -> Outcome:
+            nonlocal destination
+            transition = getattr(current, 'confirm_transition', None)
+            if transition is None:
+                raise ValueError('There is no draft to approve yet.')
+            destination = transition(lambda: self._base(graph, current), delegating=pieces is not None)
             return Outcome('approved')
 
         def apply(edit: Edit, source: Node, outcome: Outcome) -> Edge | None:
             source.update_workflow(status='done')
             if pieces is None:
+                assert destination is not None
                 return self._successor(edit, source, destination, outcome)
             children = self._spawn(edit, source, pieces, split=True)
             source.update_workflow(split=[child.id for child in children])
             return None
 
-        return self._advance(node, approve_draft, apply)
+        return self._advance(node, confirm, apply)
 
     def _run_agent(self, node_id: int, message: str, *, starting: bool) -> Step:
         graph, node = self._current(node_id)
-        agent = self.agents.get(node.node_type)
-        if agent is None:
+        turn_name = 'init' if starting else 'follow_up'
+        if not hasattr(node, turn_name):
             raise ValueError(f'Node {node.id} has no subagent.')
         if starting and node.conversation is not None:
             raise ValueError('This node already has a conversation. Send a follow-up instead.')
         if not starting and node.conversation is None:
             raise ValueError('Start this node before sending a follow-up.')
-        turn = agent.start if starting else agent.follow_up
 
         def run(current: Node) -> Outcome:
             base = self._base(graph, current, snapshot=current.commit_sha)
             if current.commit_sha is None:
                 current.data = {**_data(current), 'base_commit': base}
             checkout = self._open_checkout(current, base, legacy_path=self.worktrees / str(current.id))
-            return turn(graph, current, message, checkout)
+            return getattr(current, turn_name)(graph, message, checkout, self.agents, self.save_commit, self.progress)
 
         def apply(edit: Edit, source: Node, outcome: Outcome) -> Edge | None:
-            if outcome.name == 'blocked':
-                return self._suspend(edit, source, [ScopedWork(brief) for brief in outcome.data['briefs']])
-            if outcome.name == 'review':
-                return self._successor(edit, source, NewNode(NodeType.HUMAN_REVIEW, {'target_id': source.id}), outcome)
-            return None
+            apply_turn = getattr(source, 'apply_turn', None)
+            if apply_turn is None:
+                return None
+            return apply_turn(edit, outcome, suspend, self._successor)
+
+        def suspend(edit: Edit, source: Node, briefs: list[str]) -> Edge:
+            return self._suspend(edit, source, [ScopedWork(brief) for brief in briefs])
 
         return self._advance(node, run, apply)
 
@@ -126,18 +116,13 @@ class WorkSession:
     def _suspend(self, edit: Edit, source: Node, pieces: list[ScopedWork]) -> Edge:
         children = self._spawn(edit, source, pieces, split=False)
         source.update_workflow(status='done')
-        data = {**_data(source)}
-        if source.node_type == NodeType.IMPLEMENTATION:
-            data['paused'] = True
-        resume = edit.add(NewNode(source.node_type, data, commit_sha=source.commit_sha,
-                                  conversation=source.conversation))
+        continuation = getattr(source, 'continuation', None)
+        resume = edit.add(continuation() if continuation else NewNode(
+            source.node_type, {**_data(source)}, commit_sha=source.commit_sha, conversation=source.conversation,
+        ))
         resume.update_workflow(scope=edit.graph.scope(source), after=[source.id],
                                requires=[child.id for child in children])
         return edit.transition(source, resume, 'interrupted', {'prerequisites': [child.id for child in children]})
-
-    def review_target(self, node_id: int) -> Node:
-        graph, review = self._current(node_id, NodeType.HUMAN_REVIEW)
-        return graph.node(_data(review)['target_id'])
 
     def earlier_steps(self, node_id: int) -> list[Node]:
         graph, review = self._current(node_id, NodeType.HUMAN_REVIEW)

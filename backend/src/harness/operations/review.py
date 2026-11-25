@@ -8,12 +8,7 @@ from harness.graph.node import Node, NodeData
 
 @dataclass(kw_only=True)
 class ReviewData(NodeData):
-    reviewed_commit_sha: str | None = None
-    return_review_id: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.base_commit is None:
-            self.base_commit = self.reviewed_commit_sha
+    pass
 
 
 class Review(Node[ReviewData]):
@@ -50,11 +45,7 @@ class Review(Node[ReviewData]):
 
     def _changed_files(self) -> list[FileChange]:
         source = self.graph.creation_edge(self).source
-        base = source.state.data.base_commit
-        commit = self.state.data.reviewed_commit_sha or source.state.commit_sha
-        if not base or not commit:
-            raise ModelRetry('This review has no saved Git comparison.')
         repository = self.graph.workspace.repository
-        return [change for change in repository.changed_files(base, commit)
+        return [change for change in repository.changed_files(source.state.commit_sha, self.state.commit_sha)
                 if all(repository.is_readable_path(path) for path in (change.old_path, change.new_path)
                        if path is not None)]

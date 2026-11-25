@@ -45,7 +45,7 @@ class Node(Base):
     model: Mapped[str | None]
     conversation: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
     branch_ref: Mapped[str | None]
-    commit_sha: Mapped[str | None]
+    commit_sha: Mapped[str]
     status: Mapped[str | None]
     data: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
 

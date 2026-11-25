@@ -67,10 +67,7 @@ class HarnessQueries:
         node = graph.find_node(node_id)
         if node is None:
             raise LookupError("That step does not belong to this work item.")
-        revision = node.state.commit_sha or node.state.data.base_commit
-        if revision is None:
-            raise LookupError("This step has no saved repository snapshot.")
-        return GitRepository(Path(project.repository_path)).read_text_file(revision, path)
+        return GitRepository(Path(project.repository_path)).read_text_file(node.state.commit_sha, path)
 
     def implementation_diff(self, item_id: int, node_id: int) -> dict[str, Any]:
         repository, base, commit = self._implementation_comparison(item_id, node_id)
@@ -99,13 +96,11 @@ class HarnessQueries:
         implementation = graph.creation_edge(node).source if isinstance(node, Review) else node
         if not isinstance(implementation, Implementation):
             raise LookupError("This step has no implementation to compare.")
-        reviewed_commit = node.state.data.reviewed_commit_sha if isinstance(node, Review) else None
-        commit = reviewed_commit or implementation.state.commit_sha
-        base = implementation.state.data.base_commit
-        if not base or not commit:
-            raise LookupError("This implementation has no saved comparison yet.")
-
-        return GitRepository(Path(project.repository_path)), base, commit
+        repository = GitRepository(Path(project.repository_path))
+        commit = node.state.commit_sha
+        if node is implementation and implementation.state.branch_ref is not None:
+            commit = repository.commit_sha(implementation.state.branch_ref)
+        return repository, implementation.state.commit_sha, commit
 
 
 def _node_view(node: Node) -> dict[str, Any]:
@@ -128,8 +123,7 @@ def _review_view(graph: Graph, node: Review) -> dict[str, Any]:
     source = graph.creation_edge(node).source
     earlier_ids = [step.id for step in graph.predecessors(source)
                    if step.node_type in ('technical_planning', 'goal_alignment')]
-    return {'target_id': source.id, 'earlier_ids': earlier_ids,
-            'return_review_id': node.state.data.return_review_id}
+    return {'target_id': source.id, 'earlier_ids': earlier_ids}
 
 def _edge_view(edge: Edge) -> dict[str, Any]:
     return {

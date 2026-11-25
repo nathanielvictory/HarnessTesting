@@ -42,8 +42,8 @@ class TechnicalPlanning(Node[TechnicalPlanningData]):
     ) -> str:
         """Create an implementation node with the complete plan."""
         state = NodeState(ImplementationData(
-            brief=self.state.data.brief, plan=plan, base_commit=self.state.data.base_commit,
-        ))
+            brief=self.state.data.brief, plan=plan,
+        ), commit_sha=self.state.commit_sha)
         self.graph.create_nodes(self, Implementation, [state], 'handoff')
         return 'Created an implementation node.'
 
@@ -55,6 +55,6 @@ class TechnicalPlanning(Node[TechnicalPlanningData]):
         """Create one goal alignment node per goal."""
         from .alignment import GoalAlignment, GoalAlignmentData
 
-        states = [NodeState(GoalAlignmentData(goal=goal, base_commit=self.state.data.base_commit)) for goal in goals]
+        states = [NodeState(GoalAlignmentData(goal=goal), commit_sha=self.state.commit_sha) for goal in goals]
         self.graph.create_nodes(self, GoalAlignment, states, 'handoff')
         return 'Created the goal alignment nodes.'

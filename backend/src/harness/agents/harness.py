@@ -9,6 +9,7 @@ from pydantic_ai.capabilities import AgentCapability, LocalWorkspace, WindowsWor
 from pydantic_ai.conversation import ConversationTypeAdapter
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import FunctionToolCallEvent, ModelRequest, ModelResponse, SystemPromptPart
+from pydantic_ai.output import OutputSpec
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai_harness.file_system import FileSystem
 from pydantic_ai_harness.spend_limits import SpendLimits, SpendRecordedEvent
@@ -18,7 +19,7 @@ from harness.persistence.usage import UsageRepository
 
 @dataclass(frozen=True)
 class AgentTurn:
-    output: str
+    output: object
     conversation: dict[str, Any] | None
     paused: bool = False
 
@@ -41,6 +42,7 @@ class AgentHarness:
         worktree: Path | None = None,
         progress: Callable[[str], None] | None = None,
         tools: tuple[str | Tool[None], ...] = (),
+        output_type: OutputSpec[object] = str,
     ) -> AgentTurn:
         prior = ConversationTypeAdapter.validate_python(conversation) if conversation is not None else None
         if prior is not None:
@@ -80,7 +82,7 @@ class AgentHarness:
                     progress(event.part.tool_name)
 
         agent = Agent(
-            selected_model, system_prompt=instructions or (),
+            selected_model, system_prompt=instructions or (), output_type=output_type,
             capabilities=capabilities, model_settings=self.model_settings, tools=function_tools,
         )
         if usage is not None and node_id is not None:

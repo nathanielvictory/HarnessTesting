@@ -75,10 +75,6 @@ class Graph:
             raise ValueError(f'Node {node_id} is not ready.')
         return node
 
-    @property
-    def base_commit(self) -> str | None:
-        return self.node(self.entry_node_id).state.data.base_commit if self.entry_node_id is not None else None
-
     def connect[D: NodeData](self, source: Node, node_class: type[Node[D]], state: NodeState[D],
                              outcome: str, note: str = '') -> Edge:
         target = self._make_node(node_class, state, self)

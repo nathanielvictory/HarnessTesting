@@ -19,7 +19,7 @@ The shared agent runner records Pydantic AI Harness `SpendLimits` events in SQLi
 
 ## Path implemented today
 
-Goal Alignment creates a Technical Planning node. Technical Planning can create an Implementation node or multiple Goal Alignment nodes. Implementation can create a Review node after saving its changes. Creation records destination nodes and pending edges. When the source creates a new set, the graph replaces its earlier unapproved destinations and keeps the approved history.
+Goal Alignment creates a Technical Planning node. Technical Planning can create an Implementation node or multiple Goal Alignment nodes. Creation records destination nodes and pending edges. When the source creates a new set, the graph replaces its earlier unapproved destinations and keeps the approved history.
 
 Approval identifies an edge by ID. The same request can edit the destination's input data before its first turn starts. A user can continue an existing conversation on a node that has not been superseded, including a completed node.
 
@@ -31,7 +31,7 @@ The [agent harness](../backend/src/harness/agents/harness.py) adapts Pydantic AI
 
 - **Goal Alignment** can list, search, and read repository files at its Git baseline.
 - **Technical Planning** receives the brief and can read files at its saved baseline.
-- **Implementation** receives the brief, plan, and any feedback. It can read and edit files. Its Git workspace saves the resulting commit, and the node records the branch and SHA.
-- **Review** stores the commit it reviews. A new Review can read, list, and search files in the saved implementation snapshot.
+- **Implementation** receives the brief, plan, and any feedback. It can read and edit files and saves the resulting commits on its branch.
+- **Review** starts at the Implementation branch tip captured when the Review node is created. Its read and diff tools stay pinned to that commit.
 
-Each work item uses a fixed checkout under `worktrees/items/` in the state directory and switches branches between nodes. Harness reuses the checkout across turns and restarts, and recreates a missing checkout from the saved commit. On resumption, Harness checks that the branch still points to the saved SHA. For a Review diff, the query gets the baseline from the Implementation node on the incoming creation edge and compares it to Review's saved commit.
+Every node has a required `nodes.commit_sha` for its starting commit. The value stays fixed across turns. Each work item uses a checkout under `worktrees/items/` in the state directory and switches branches between nodes. An Implementation diff compares its starting commit with its branch tip. A Review diff compares the source Implementation's starting commit with Review's starting commit.

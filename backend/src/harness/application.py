@@ -105,8 +105,8 @@ class Harness:
             raise ValueError('Enter an opening message.')
         project = self.catalog.get_project(project_id)
         title = (title or "").strip() or None
-        base = GitRepository(Path(project.repository_path)).commit_sha()
-        item, node_id = self.catalog.add_work_item(project_id, title, base_commit=base, goal=message)
+        commit_sha = GitRepository(Path(project.repository_path)).commit_sha()
+        item, node_id = self.catalog.add_work_item(project_id, title, commit_sha=commit_sha, goal=message)
         with ExitStack() as activity:
             finish = activity.enter_context(self._active.claim(item.id))
             self._queue_turn(item.id, node_id, 'Starting the node', lambda node: node.init(), activity, finish)

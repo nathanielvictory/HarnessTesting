@@ -21,23 +21,21 @@ class NodeStatus(StrEnum):
 
 @dataclass(kw_only=True)
 class NodeData:
-    base_commit: str | None = None
     summary: str | None = None
 
 
 @dataclass
 class NodeState[D: NodeData]:
     data: D
+    commit_sha: str
     id: int | None = None
     status: NodeStatus = NodeStatus.PENDING
     model: str | None = None
     conversation: dict[str, Any] | None = None
     branch_ref: str | None = None
-    commit_sha: str | None = None
 
 
 class Node[D: NodeData](ABC):
-    saves_changes = False
     data_type: type[D]
 
     def __init__(self, state: NodeState[D], graph: Graph, agent: AgentHarness) -> None:
@@ -85,19 +83,12 @@ class Node[D: NodeData](ABC):
     def _run(self, prompt: str, *, instructions: str | None = None) -> AgentTurn:
         agent = self.agent
         state = self.state
-        workspace = self.graph.workspace
-        checkout, state.branch_ref, base = workspace.prepare(
-            self.id, state.branch_ref, state.commit_sha or state.data.base_commit or self.graph.base_commit,
-        )
-        if state.commit_sha is None:
-            state.data.base_commit = base
+        checkout, state.branch_ref = self.graph.workspace.prepare(self.id, state.branch_ref, state.commit_sha)
         reply = agent.run_turn(
             prompt, instructions=instructions, model=agent.model, conversation=state.conversation,
             worktree=checkout, node_id=self.id, progress=self.graph.progress,
             tools=self.model_tools(),
         )
-        if self.saves_changes:
-            state.commit_sha = workspace.save(checkout)
         state.model = agent.model
         state.conversation = reply.conversation
         return reply

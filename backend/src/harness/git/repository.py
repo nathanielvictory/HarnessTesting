@@ -50,7 +50,7 @@ class GitRepository:
         expected = self.commit_sha(commit_sha)
         exists = branch_ref in _git(self.path, "for-each-ref", "--format=%(refname)", branch_ref).splitlines()
         if exists and self.commit_sha(branch_ref) != expected:
-            raise GitError(f"{branch_ref} no longer points to saved commit {expected}")
+            raise GitError(f"{branch_ref} no longer points to commit {expected}")
 
         worktrees = self._worktree_branches()
         checked_out = next((directory for directory, ref in worktrees.items() if ref == branch_ref), None)
@@ -184,6 +184,7 @@ class GitWorkspace:
     def __init__(self, repository_path: Path, worktrees: Path, item_id: int, title: str | None) -> None:
         self.repository_path = repository_path
         self.worktrees = worktrees
+        self.checkout = worktrees / 'items' / str(item_id)
         self.item_id = item_id
         self.title = title
 
@@ -191,17 +192,15 @@ class GitWorkspace:
     def repository(self) -> GitRepository:
         return GitRepository(self.repository_path)
 
-    def prepare(self, node_id: int, branch_ref: str | None, base: str | None) -> tuple[Path, str, str]:
-        repository = self.repository
-        commit = base or repository.commit_sha()
-        checkout = self.worktrees / 'items' / str(self.item_id)
-        checkout.parent.mkdir(parents=True, exist_ok=True)
+    def prepare(self, node_id: int, branch_ref: str | None, commit_sha: str) -> tuple[Path, str]:
+        self.checkout.parent.mkdir(parents=True, exist_ok=True)
         branch_ref = branch_ref or f'refs/heads/harness/{self.item_id}-{node_id}'
-        path = repository.open_worktree(checkout, branch_ref, commit, legacy_path=self.worktrees / str(node_id))
-        return path, branch_ref, commit
+        path = self.repository.open_worktree(self.checkout, branch_ref, commit_sha,
+                                            legacy_path=self.worktrees / str(node_id))
+        return path, branch_ref
 
-    def save(self, checkout: Path) -> str:
-        return self.repository.save_commit(checkout, self.title or f'Work item {self.item_id}')
+    def save(self) -> str:
+        return self.repository.save_commit(self.checkout, self.title or f'Work item {self.item_id}')
 
 def _json_text(text: str) -> str:
     return text.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")

@@ -38,8 +38,6 @@ class GoalAlignment(Node[GoalAlignmentData]):
         self, brief: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)],
     ) -> str:
         """Create a technical planning node with the complete brief."""
-        state = NodeState(TechnicalPlanningData(
-            brief=brief, base_commit=self.state.data.base_commit,
-        ))
+        state = NodeState(TechnicalPlanningData(brief=brief), commit_sha=self.state.commit_sha)
         self.graph.create_nodes(self, TechnicalPlanning, [state], 'handoff')
         return 'Created a technical planning node.'

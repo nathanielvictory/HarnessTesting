@@ -57,13 +57,12 @@ class GraphRepository:
                 state = node.state
                 record = records.get(state.id)
                 if record is None:
-                    record = NodeRecord(work_item=item, node_type=NodeType(node.node_type))
+                    record = NodeRecord(work_item=item, node_type=NodeType(node.node_type), commit_sha=state.commit_sha)
                     session.add(record)
                 record.status = state.status.value
                 record.model = state.model
                 record.conversation = state.conversation
                 record.branch_ref = state.branch_ref
-                record.commit_sha = state.commit_sha
                 record.data = asdict(state.data)
                 if state.id is None:
                     session.flush()
@@ -134,10 +133,6 @@ def _node_data(row: NodeRecord, raw_data: dict[int, dict]) -> dict:
         goal = raw_data.get(plan.get('goal_id'), {})
         data['plan'] = plan.get('approved') or plan.get('summary') or plan.get('draft') or ''
         data['brief'] = plan.get('brief') or goal.get('approved') or goal.get('summary') or goal.get('draft') or ''
-        if not data.get('base_commit'):
-            data['base_commit'] = plan.get('base_commit')
-    if row.node_type == NodeType.REVIEW and 'reviewed_commit_sha' not in data:
-        data['reviewed_commit_sha'] = (data.get('last_decision') or {}).get('reviewed_commit_sha')
     if 'summary' not in data:
         data['summary'] = data.get('draft') or data.get('approved')
     return data

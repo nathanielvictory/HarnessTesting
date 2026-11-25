@@ -106,7 +106,7 @@ export function useWorkspace() {
       onSubmitted?.();
       setDetail(updated);
 
-      const next = (command.type === 'approve' || command.type === 'review') &&
+      const next = command.type === 'approve' &&
         automaticTurn(detail, updated, command.node_id);
       if (next) {
         setBusy(commandLabel(next, updated));
@@ -138,19 +138,22 @@ function commandLabel(command: WorkItemCommand, detail: WorkItemDetail) {
         default: return 'Preparing an alignment reply';
       }
     case 'approve': return 'Saving approval';
-    case 'review': return 'Recording the review';
+    case 'review': return 'Requesting the review decision';
+    case 'delegate': return 'Requesting delegation';
     case 'close': return 'Closing the work item';
-    case 'discover': return 'Adding scoped prerequisites';
-    case 'reopen': return 'Reopening the step';
+    case 'discover': return 'Requesting scoped prerequisites';
+    case 'reopen': return 'Requesting reopening';
   }
 }
 
-// Preserve the existing automatic follow-up after a browser approval or review.
+// Preserve the existing automatic follow-up once the requested edge is approved.
 function automaticTurn(before: WorkItemDetail, detail: WorkItemDetail, source: number): WorkItemCommand | undefined {
   if (detail.work_item.status === 'complete' || before.ready_node_ids.length !== 1 || detail.ready_node_ids.length !== 1) return;
   const current = detail.nodes.find(node => node.id === detail.ready_node_ids[0]);
+  const fromReview = before.nodes.find(node => node.id === source)?.node_type === 'human_review';
   if (!current || !detail.transitions.slice(before.transitions.length).some(edge =>
-    edge.from_node_id === source && edge.to_node_id === current.id && edge.outcome !== 'delegated')) return;
+    edge.from_node_id === source && edge.to_node_id === current.id &&
+    (edge.outcome === 'approved' || edge.outcome === 'feedback' || (fromReview && edge.outcome === 'reopened')))) return;
   if (current.node_type === 'implementation') {
     return current.conversation_started
       ? { type: 'messages', node_id: current.id, message: current.data?.feedback || 'Continue the interrupted implementation.' }

@@ -2,16 +2,21 @@ import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from harness.agents.harness import AgentTurn
-from harness.git.repository import GitError, GitRepository
+from harness.application import ActiveCommands, Harness
+from harness.git.repository import GitRepository
 from harness.operations.review import ReviewDecision
-from harness.operations.work_session import ScopedWork, WorkSession
+from harness.graph.node import NodeState, NodeStatus
+from harness.graph.state import EdgeStatus
+from harness.operations.implementation import Implementation, ImplementationData
+from harness.operations.planning import TechnicalPlanning
 from harness.persistence.catalog import Catalog
 from harness.persistence.database import Database
 from harness.persistence.graph.repository import GraphRepository
 from harness.persistence.models import Node as NodeRecord
-from harness.persistence.models import NodeType, WorkItemStatus
+from harness.persistence.models import WorkItemStatus
 
 
 class FakeAgent:
@@ -20,9 +25,11 @@ class FakeAgent:
     def __init__(self):
         self.turns = []
         self.prompts = []
+        self.turn_options = []
 
     def run_turn(self, prompt, **kwargs):
         self.prompts.append(prompt)
+        self.turn_options.append(kwargs)
         if self.turns:
             return self.turns.pop(0)(kwargs['worktree'], kwargs['conversation'])
         return AgentTurn('Draft: ' + prompt, {'messages': []})
@@ -45,29 +52,54 @@ class FrontierTest(unittest.TestCase):
         self.database = Database(root / 'state.sqlite3')
         self.addCleanup(self.database.close)
         self.database.initialize()
-        self.catalog = Catalog(self.database)
-        project = self.catalog.add_project('Test', str(self.repo))
-        self.item = self.catalog.add_work_item(project.id, 'Frontier', base_commit=self.base)
-        self.store = GraphRepository(self.database)
         self.agent = FakeAgent()
-        self.work = WorkSession(self.item.id, self.store, self.repository, self.agent, root / 'worktrees', self.item.title)
+        graphs = GraphRepository(self.database, self.agent, root / 'worktrees')
+        self.harness = Harness(Catalog(self.database), graphs, ActiveCommands())
+        project = self.harness.register_project('Test', str(self.repo))
+        self.item = self.harness.create_work_item(project.id, 'Frontier')
+
+    def graph(self):
+        return self.harness.graphs.load(self.item.id)
+
+    def status(self):
+        return self.harness.catalog.get_work_item(self.item.id)[1].status
+
+    def pending(self, node_id):
+        return [edge for edge in self.graph().edges
+                if edge.from_node_id == node_id and edge.status == EdgeStatus.PENDING]
+
+    def approve(self, node_id, outcome):
+        edge, = [edge for edge in self.pending(node_id) if edge.outcome == outcome]
+        self.harness.approve_edge(self.item.id, edge.id)
+        return edge.to_node_id
+
+    def add_two_implementations(self, plan):
+        def record_reply(node, reply):
+            node.state.data.summary = reply.output
+            for _ in range(2):
+                node.graph.connect(node, Implementation, NodeState(ImplementationData(
+                    brief=node.state.data.brief, plan=reply.output,
+                )), 'handoff')
+
+        with patch.object(TechnicalPlanning, 'record_reply', record_reply):
+            self.harness.start(self.item.id, plan, 'Try both implementations')
 
     def git(self, *args):
         return subprocess.check_output(['git', '-C', str(self.repo), *args], text=True).strip()
 
     def ready(self):
-        return [node.id for node in self.work.graph().current_nodes()]
+        return [node.id for node in self.graph().current_nodes()]
 
     def plan(self, goal_id=None):
         if goal_id is None:
             goal_id, = self.ready()
-        self.work.start(goal_id, 'Draft the brief')
-        plan = self.work.approve(goal_id).edge.to_node_id
-        self.work.start(plan, 'Draft the plan')
+        self.harness.start(self.item.id, goal_id, 'Draft the brief')
+        plan = self.approve(goal_id, 'handoff')
+        self.harness.start(self.item.id, plan, 'Draft the plan')
         return plan
 
     def implementation(self, goal_id):
-        return self.work.approve(self.plan(goal_id)).edge.to_node_id
+        return self.approve(self.plan(goal_id), 'handoff')
 
     def write_turn(self, filename, content, output='Done'):
         def turn(checkout, conversation):
@@ -75,162 +107,133 @@ class FrontierTest(unittest.TestCase):
             return AgentTurn(output, {'messages': [], 'test': filename})
         self.agent.turns.append(turn)
 
-    def accept(self, impl_id, filename):
-        self.write_turn(filename, filename)
-        review = self.work.start(impl_id).edge.to_node_id
-        return self.work.review(ReviewDecision.ACCEPT, node_id=review)
+    def test_two_edges_exist_before_either_is_approved(self):
+        goal, = self.ready()
+        self.harness.start(self.item.id, goal, 'Draft the brief')
+        plan = self.approve(goal, 'handoff')
+        self.add_two_implementations(plan)
 
-    def test_independent_nodes_require_explicit_selection(self):
-        self.work.approve(self.plan(), [ScopedWork('First'), ScopedWork('Second')])
-        newest, oldest = self.ready()
-        self.assertGreater(newest, oldest)
-        with self.assertRaises(TypeError):
-            self.work.start()
-        self.assertEqual(self.work.start(oldest, 'Choose older').node.id, oldest)
-        self.assertIsNone(self.work.graph().node(newest).conversation)
+        edges = self.pending(plan)
+        self.assertEqual(len(edges), 2)
+        self.assertEqual(self.ready(), [plan])
+        self.assertTrue(all(isinstance(edge.target, Implementation) for edge in edges))
+        self.assertTrue(all(isinstance(edge.target.state.data, ImplementationData) for edge in edges))
+        self.assertTrue(all(edge.id is not None and edge.to_node_id for edge in edges))
+        self.assertNotIn('tools', self.agent.turn_options[-1])
+
+        first, second = edges
+        with self.assertRaisesRegex(ValueError, 'not ready'):
+            self.harness.start(self.item.id, second.to_node_id)
+        self.harness.approve_edge(self.item.id, first.id)
+        self.assertEqual(self.ready(), [first.to_node_id])
+        self.assertEqual([edge.id for edge in self.pending(plan)], [second.id])
+        self.harness.approve_edge(self.item.id, second.id)
+        self.assertEqual(self.ready(), [second.to_node_id, first.to_node_id])
 
     def test_start_and_follow_up_are_distinct(self):
         goal, = self.ready()
         with self.assertRaisesRegex(ValueError, 'Start this node'):
-            self.work.follow_up(goal, 'Too early')
-        self.work.start(goal, 'Draft the brief')
+            self.harness.follow_up(self.item.id, goal, 'Too early')
+        self.harness.start(self.item.id, goal, 'Draft the brief')
         with self.assertRaisesRegex(ValueError, 'already has a conversation'):
-            self.work.start(goal)
-        plan = self.work.approve(goal).edge.to_node_id
-        self.work.start(plan, 'Draft the plan')
+            self.harness.start(self.item.id, goal)
+        plan = self.approve(goal, 'handoff')
+        self.harness.start(self.item.id, plan, 'Draft the plan')
         self.assertIn('Approved brief', self.agent.prompts[-1])
-        self.assertIsNone(self.work.follow_up(plan, 'Explain the plan').edge)
+        first, = self.pending(plan)
+        previous_plan = first.target.state.data.plan
+        self.harness.follow_up(self.item.id, plan, 'Explain the plan')
+        first, second = self.pending(plan)
+        self.assertEqual(first.target.state.data.plan, previous_plan)
+        self.assertIn('Explain the plan', second.target.state.data.plan)
         self.assertEqual(self.agent.prompts[-1], 'Explain the plan')
         self.assertEqual(self.ready(), [plan])
 
     def test_implementation_feedback_follows_up_on_saved_conversation(self):
-        impl = self.work.approve(self.plan()).edge.to_node_id
+        impl = self.implementation(None)
         self.write_turn('implementation.txt', 'first version')
-        review = self.work.start(impl).edge.to_node_id
-        self.assertIn('Approved technical plan', self.agent.prompts[-1])
-        follow_up = self.work.review(ReviewDecision.FEEDBACK, 'Adjust the result', node_id=review).edge.to_node_id
-        with self.assertRaisesRegex(ValueError, 'already has a conversation'):
-            self.work.start(follow_up)
-        self.write_turn('implementation.txt', 'updated version')
-        next_review = self.work.follow_up(follow_up, 'Adjust the result').edge.to_node_id
-        self.assertEqual(self.agent.prompts[-1], 'Adjust the result')
-        self.assertEqual(self.work.graph().node(next_review).data['target_id'], follow_up)
-
-    def test_ordered_pieces_and_interrupted_implementation(self):
-        plan = self.plan()
-        self.work.approve(plan, [ScopedWork('A'), ScopedWork('B', [0])])
-        graph = self.work.graph()
-        a, b = graph.node(plan).workflow['split']
-        self.assertEqual(self.ready(), [a])
-        self.assertEqual(graph.blockers(graph.node(b))[0]['node_id'], a)
-        with self.assertRaisesRegex(ValueError, 'not ready'):
-            self.work.start(b, 'Not yet')
-        self.assertFalse(self.accept(self.implementation(a), 'a.txt').outcome.complete)
-        b_impl = self.implementation(b)
-        self.write_turn('b.txt', 'unfinished', 'Need a helper.\nPREREQUISITES: ["Utility U"]')
-        interrupted = self.work.start(b_impl)
-        self.assertEqual(interrupted.outcome.name, 'blocked')
-        snapshot = interrupted.node.commit_sha
-        resume = interrupted.edge.to_node_id
-        utility, = self.ready()
-        with self.assertRaisesRegex(ValueError, 'not ready'):
-            self.work.follow_up(resume, 'Continue the interrupted implementation.')
-        self.assertFalse(self.work.graph().can_complete())
-        self.assertIs(self.catalog.get_work_item(self.item.id)[1].status, WorkItemStatus.IN_PROGRESS)
-        utility_impl = self.implementation(utility)
-
-        def implement_utility(checkout, _conversation):
-            self.assertFalse((checkout / 'b.txt').exists())
-            (checkout / 'u.txt').write_text('u.txt')
-            return AgentTurn('Utility done', {'messages': []})
-
-        self.agent.turns.append(implement_utility)
-        utility_review = self.work.start(utility_impl).edge.to_node_id
-        self.assertFalse(self.work.review(ReviewDecision.ACCEPT, node_id=utility_review).outcome.complete)
-        self.assertEqual(self.ready(), [resume])
-
-        def continue_b(checkout, conversation):
-            self.assertEqual(conversation['test'], 'b.txt')
-            self.assertEqual((checkout / 'b.txt').read_text(), 'unfinished')
-            self.assertTrue((checkout / 'u.txt').is_file())
-            self.assertTrue((checkout / 'a.txt').is_file())
-            (checkout / 'b.txt').write_text('finished')
-            return AgentTurn('Done', {'messages': []})
-
-        self.agent.turns.append(continue_b)
-        review = self.work.follow_up(resume, 'Continue the interrupted implementation.').edge.to_node_id
-        self.assertTrue(self.work.review(ReviewDecision.ACCEPT, node_id=review).outcome.complete)
-        graph = self.work.graph()
-        self.assertTrue(graph.scope_accepted(a))
-        self.assertEqual(graph.node(b_impl).commit_sha, snapshot)
-        self.assertEqual(self.repository.read_text_file(snapshot, 'b.txt'), 'unfinished')
-        self.assertEqual(graph.node(b_impl).conversation['test'], 'b.txt')
-        result = graph.node(graph.entry_node_id).workflow['result_commit']
-        self.assertEqual(self.git('rev-parse', f'refs/harness/results/{self.item.id}'), result)
-        for path, text in [('a.txt', 'a.txt'), ('u.txt', 'u.txt'), ('b.txt', 'finished')]:
-            self.assertEqual(self.repository.read_text_file(result, path), text)
-        self.assertEqual(self.repository.commit_sha(), self.base)
-        self.assertIs(self.catalog.get_work_item(self.item.id)[1].status, WorkItemStatus.COMPLETE)
-
-    def test_reopening_invalidates_dependents_not_independent_work(self):
-        plan = self.plan()
-        self.work.approve(plan, [ScopedWork('A'), ScopedWork('B'), ScopedWork('C', [1])])
-        a, b, c = self.work.graph().node(plan).workflow['split']
-        self.accept(self.implementation(a), 'a.txt')
-        b_plan = self.plan(b)
-        b_impl = self.work.approve(b_plan).edge.to_node_id
-        self.accept(b_impl, 'b.txt')
-        c_plan = self.plan(c)
-        self.work.reopen(b_plan, 'Use a different design for B')
-        graph = self.work.graph()
-        self.assertTrue(graph.scope_accepted(a))
-        self.assertFalse(graph.scope_accepted(b))
-        self.assertEqual(graph.node(b_impl).status, 'superseded')
-        self.assertEqual(graph.node(c_plan).status, 'superseded')
-        replacement, = graph.current_nodes()
-        self.assertEqual(replacement.node_type, NodeType.TECHNICAL_PLANNING)
-        self.assertEqual(replacement.data['goal_id'], b)
-
-    def test_cycle_rejects_and_rolls_back_entire_batch(self):
-        plan = self.plan()
-        before = self.work.graph()
-        with self.assertRaisesRegex(ValueError, 'cycle'):
-            self.work.approve(plan, [ScopedWork('A', [1]), ScopedWork('B', [0])])
-        after = self.work.graph()
-        self.assertEqual(before.nodes, after.nodes)
-        self.assertEqual(before.history(), after.history())
-        self.assertEqual(self.ready(), [plan])
-
-    def test_conflicting_accepted_work_cannot_complete(self):
-        plan = self.plan()
-        self.work.approve(plan, [ScopedWork('A'), ScopedWork('B')])
-        a, b = self.work.graph().node(plan).workflow['split']
-        self.assertFalse(self.accept(self.implementation(a), 'shared.txt').outcome.complete)
-        impl = self.implementation(b)
-        self.write_turn('shared.txt', 'conflicting edit')
-        review = self.work.start(impl).edge.to_node_id
-        with self.assertRaisesRegex(GitError, 'Could not integrate'):
-            self.work.review(ReviewDecision.ACCEPT, node_id=review)
-        self.assertEqual(self.ready(), [review])
-        self.assertTrue(self.work.graph().scope_accepted(a))
-        self.assertIs(self.catalog.get_work_item(self.item.id)[1].status, WorkItemStatus.IN_PROGRESS)
-
-    def test_straight_line_and_legacy_transition_replay(self):
-        plan = self.plan()
-        ids = list(self.work.graph().nodes)
-        with self.database.session() as session:
-            for node_id in ids:
-                row = session.get(NodeRecord, node_id)
-                row.data = {key: value for key, value in row.data.items() if key != '_workflow'}
-        self.assertEqual(self.ready(), [plan])
-        impl = self.work.approve(plan).edge.to_node_id
+        self.harness.start(self.item.id, impl)
         self.assertEqual(self.ready(), [impl])
-        self.assertTrue(self.accept(impl, 'straight.txt').outcome.complete)
+        self.assertEqual(self.pending(impl)[0].outcome, 'review')
+        review = self.approve(impl, 'review')
+        self.assertIn('Approved technical plan', self.agent.prompts[-1])
+        self.harness.review(self.item.id, review, ReviewDecision.FEEDBACK, 'Adjust the result')
+        self.assertEqual(self.ready(), [review])
+        self.assertEqual(self.pending(review)[0].outcome, 'feedback')
+        follow_up = self.approve(review, 'feedback')
+        with self.assertRaisesRegex(ValueError, 'already has a conversation'):
+            self.harness.start(self.item.id, follow_up)
+        self.write_turn('implementation.txt', 'updated version')
+        self.harness.follow_up(self.item.id, follow_up, 'Adjust the result')
+        next_review = self.approve(follow_up, 'review')
+        self.assertEqual(self.agent.prompts[-1], 'Adjust the result')
+        self.assertEqual(self.graph().node(next_review).state.data.target_id, follow_up)
 
-    def test_empty_ready_list_is_not_completion(self):
-        entry, = self.ready()
-        def change(edit):
-            edit.graph.node(entry).update_workflow(status='done')
-        self.store.edit(self.item.id, change)
-        self.assertEqual(self.ready(), [])
-        self.assertFalse(self.work.graph().can_complete())
+    def test_approval_rolls_back_to_the_existing_node(self):
+        impl = self.implementation(None)
+        self.write_turn('implementation.txt', 'first version')
+        self.harness.start(self.item.id, impl)
+        review = self.approve(impl, 'review')
+        before = self.graph()
+        saved = before.node(impl).state
+
+        self.harness.review(self.item.id, review, ReviewDecision.REVISE, 'Adjust the implementation')
+        pending = self.graph()
+        edge, = self.pending(review)
+        self.assertEqual(self.ready(), [review])
+        self.assertEqual(len(pending.nodes), len(before.nodes))
+        self.assertEqual(edge.to_node_id, impl)
+        self.assertEqual(edge.status, EdgeStatus.PENDING)
+
+        self.assertEqual(self.approve(review, 'rollback'), impl)
+        after = self.graph()
+        self.assertEqual({node.id for node in after.nodes}, {node.id for node in before.nodes})
+        self.assertEqual(self.ready(), [impl])
+        self.assertEqual(after.node(review).status, NodeStatus.SUPERSEDED)
+        resumed = after.node(impl).state
+        self.assertEqual(resumed.conversation, saved.conversation)
+        self.assertEqual(resumed.branch_ref, saved.branch_ref)
+        self.assertEqual(resumed.commit_sha, saved.commit_sha)
+
+        def continue_implementation(checkout, conversation):
+            self.assertEqual(conversation, saved.conversation)
+            self.assertEqual((checkout / 'implementation.txt').read_text(), 'first version')
+            return AgentTurn('Adjusted', conversation)
+
+        self.agent.turns.append(continue_implementation)
+        self.harness.follow_up(self.item.id, impl, 'Adjust the implementation')
+        plan, = [node.id for node in after.predecessors(after.node(impl)) if isinstance(node, TechnicalPlanning)]
+        self.harness.rollback(self.item.id, impl, plan, 'Revisit the plan')
+        self.assertEqual(self.approve(impl, 'rollback'), plan)
+        self.assertEqual(self.ready(), [plan])
+
+    def test_work_item_status_and_edge_approval_are_independent(self):
+        goal, = self.ready()
+        self.harness.start(self.item.id, goal, 'Draft the brief')
+        edge, = self.pending(goal)
+        self.harness.close_work_item(self.item.id)
+        self.assertIs(self.status(), WorkItemStatus.COMPLETE)
+        self.assertEqual(self.ready(), [goal])
+        self.assertEqual([item.id for item in self.pending(goal)], [edge.id])
+        self.harness.approve_edge(self.item.id, edge.id)
+        self.assertEqual(self.ready(), [edge.to_node_id])
+        self.assertIs(self.status(), WorkItemStatus.COMPLETE)
+
+    def test_saved_legacy_nodes_get_typed_data(self):
+        plan = self.plan()
+        graph = self.graph()
+        goal = graph.entry_node_id
+        with self.database.session() as session:
+            old_goal = session.get(NodeRecord, goal)
+            old_goal.data = {'base_commit': self.base, 'approved': 'An older brief'}
+            old_goal.status = None
+            old_plan = session.get(NodeRecord, plan)
+            old_plan.data = {'goal_id': goal, 'base_commit': self.base}
+            old_plan.status = None
+
+        node = self.graph().node(plan)
+        self.assertIsInstance(node, TechnicalPlanning)
+        self.assertEqual(node.state.data.brief, 'An older brief')
+        self.assertEqual(self.ready(), [plan])
+        self.harness.follow_up(self.item.id, plan, 'Continue planning')
+        self.assertEqual(self.pending(plan)[-1].target.state.data.brief, 'An older brief')

@@ -23,6 +23,7 @@ class Edge(Base):
     to_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     outbound_order: Mapped[int]
     outcome: Mapped[str]
+    status: Mapped[str] = mapped_column(server_default='approved')
     data: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
 
     from_node: Mapped[Node] = relationship(back_populates="outgoing_edges", foreign_keys=[from_node_id])

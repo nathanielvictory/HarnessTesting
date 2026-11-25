@@ -62,7 +62,7 @@ export function ReviewStep({ target, node, done, busy, links, perform, earlier }
       </select>
     </label>}
     <div><button className="primary" disabled={!decision || (needsNote && !note.trim())}>
-      Record decision
+      Request decision
     </button></div>
   </form>;
 

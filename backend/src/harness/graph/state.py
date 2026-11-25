@@ -1,167 +1,180 @@
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from enum import StrEnum
+
+from harness.git.repository import GitWorkspace
+
+from .node import Node, NodeData, NodeState, NodeStatus
+
+
+class EdgeStatus(StrEnum):
+    PENDING = 'pending'
+    APPROVED = 'approved'
 
 
 @dataclass
-class Node:
-    id: int
-    node_type: str
-    model: str | None = None
-    conversation: dict[str, Any] | None = None
-    branch_ref: str | None = None
-    commit_sha: str | None = None
-    data: dict[str, Any] | None = None
-
-    @property
-    def workflow(self) -> dict:
-        return (self.data or {}).get('_workflow', {})
-
-    def update_workflow(self, **fields: Any) -> None:
-        self.data = {**(self.data or {}), '_workflow': {**self.workflow, **fields}}
-
-    @property
-    def status(self) -> str:
-        return self.workflow.get('status', 'pending')
-
-
-@dataclass(frozen=True)
 class Edge:
-    from_node_id: int
-    to_node_id: int
+    source: Node
+    target: Node
     outbound_order: int
     outcome: str
-    data: dict[str, Any] | None = None
+    note: str = ''
+    status: EdgeStatus = EdgeStatus.PENDING
+    id: int | None = None
+
+    @property
+    def from_node_id(self) -> int:
+        return self.source.id
+
+    @property
+    def to_node_id(self) -> int:
+        return self.target.id
 
 
 class Graph:
-    def __init__(self, entry_node_id: int | None, nodes: list[Node], edges: list[Edge]):
+    def __init__(self, entry_node_id: int | None, workspace: GitWorkspace, *,
+                 make_node: Callable[[type[Node], NodeState, Graph], Node],
+                 progress: Callable[[str], None] | None = None) -> None:
         self.entry_node_id = entry_node_id
-        self.nodes = {node.id: node for node in nodes}
-        self._history = tuple(edges)
-        for edge in edges:
-            self.node(edge.from_node_id)
-            self.node(edge.to_node_id)
-        if entry_node_id is not None and not any('_workflow' in (node.data or {}) for node in nodes):
-            self._restore_linear_item()
+        self.workspace = workspace
+        self.progress = progress
+        self.nodes: list[Node] = []
+        self.edges: list[Edge] = []
+        self._make_node = make_node
 
-    def _restore_linear_item(self) -> None:
-        # Old items recorded only a transition walk. Replay its lifecycle once;
-        # the repository persists this metadata with the next graph mutation.
-        active = self.entry_node_id
-        for edge in self._history:
-            source = self.node(edge.from_node_id)
-            source.update_workflow(status='done')
-            target = self.node(edge.to_node_id)
-            target.update_workflow(status='pending')
-            if edge.outcome in ('approved', 'review', 'review_earlier'):
-                target.update_workflow(after=[source.id])
-            if edge.outcome == 'revise':
-                previous = (source.data or {}).get('target_id')
-                if previous in self.nodes:
-                    # A legacy revision abandoned the previous tail. Keep it
-                    # inspectable, but don't treat it as part of the new path.
-                    abandoned = {previous}
-                    if self.node(previous).node_type == 'implementation':
-                        abandoned.add((self.node(previous).data or {}).get('plan_id'))
-                    for old in sorted(self.nodes.values(), key=lambda candidate: candidate.id):
-                        if old.id < target.id and (old.id in abandoned or abandoned.intersection(old.workflow.get('after', []))):
-                            abandoned.add(old.id)
-                            old.update_workflow(status='superseded')
-                if goal := (target.data or {}).get('goal_id'):
-                    target.update_workflow(after=[goal])
-            active = target.id
-        if active is not None:
-            node = self.node(active)
-            decision = (node.data or {}).get('last_decision', {})
-            accepted = decision.get('action') == 'accept'
-            node.update_workflow(status='done' if accepted else 'pending')
-            if accepted and decision.get('reviewed_commit_sha'):
-                commit = decision['reviewed_commit_sha']
-                node.update_workflow(accepted_commit=commit)
-                self.node(self.entry_node_id).update_workflow(result_commit=commit)
+    def find_node(self, node_id: int) -> Node | None:
+        return next((node for node in self.nodes if node.state.id == node_id), None)
 
     def node(self, node_id: int) -> Node:
-        if node_id not in self.nodes:
-            raise ValueError(f'Node {node_id} is outside this graph')
-        return self.nodes[node_id]
+        node = self.find_node(node_id)
+        if node is None:
+            raise LookupError(f'Node {node_id} is outside this graph.')
+        return node
 
     def history(self) -> tuple[Edge, ...]:
-        return self._history
+        return tuple(self.edges)
 
-    def scope(self, node: Node) -> int:
-        return node.workflow.get('scope', self.entry_node_id or node.id)
+    def creation_edge(self, node: Node) -> Edge:
+        for edge in self.edges:
+            if edge.target is node and edge.outcome != 'rollback':
+                return edge
+        raise LookupError(f'Node {node.id} has no creation edge.')
 
-    def scopes(self) -> dict[int, list[Node]]:
-        groups: dict[int, list[Node]] = {}
-        for node in self.nodes.values():
-            if node.status != 'superseded':
-                groups.setdefault(self.scope(node), []).append(node)
-        return groups
-
-    def blockers(self, node: Node) -> list[dict[str, Any]]:
-        return [
-            {'node_id': key, 'reason': 'Step must succeed'}
-            for key in node.workflow.get('after', []) if self.node(key).status != 'done'
-        ] + [
-            {'node_id': key, 'reason': 'Scoped work must be accepted'}
-            for key in node.workflow.get('requires', []) if not self.scope_accepted(key)
-        ]
-
-    def scope_accepted(self, scope: int) -> bool:
-        members = self.scopes().get(scope, [])
-        return bool(members) and all(node.status == 'done' for node in members) and any(
-            node.workflow.get('accepted_commit') or (
-                node.workflow.get('split') and all(self.scope_accepted(child) for child in node.workflow['split'])
-            ) for node in members
+    def is_ready(self, node: Node) -> bool:
+        return node.status == NodeStatus.PENDING and (
+            node.state.id == self.entry_node_id and self.entry_node_id is not None
+            or any(edge.target is node and edge.status == EdgeStatus.APPROVED for edge in self.edges)
         )
-
-    def can_complete(self) -> bool:
-        scopes = self.scopes()
-        return bool(scopes) and all(self.scope_accepted(key) for key in scopes)
 
     def current_nodes(self) -> list[Node]:
-        return sorted(
-            (node for node in self.nodes.values() if node.status == 'pending' and not self.blockers(node)),
-            key=lambda node: node.id, reverse=True,
-        )
+        return sorted((node for node in self.nodes if self.is_ready(node)), key=lambda node: node.id, reverse=True)
 
     def select(self, node_id: int) -> Node:
         node = self.node(node_id)
-        if node.status != 'pending' or self.blockers(node):
+        if not self.is_ready(node):
             raise ValueError(f'Node {node_id} is not ready.')
         return node
 
-    def record_transition(self, source: int, target: int, outcome: str, data: dict | None) -> Edge:
-        self.node(source)
-        self.node(target)
-        edge = Edge(source, target, self.next_order(source), outcome, data)
-        self._history += (edge,)
+    @property
+    def base_commit(self) -> str | None:
+        return self.node(self.entry_node_id).state.data.base_commit if self.entry_node_id is not None else None
+
+    def connect[D: NodeData](self, source: Node, node_class: type[Node[D]], state: NodeState[D],
+                             outcome: str, note: str = '') -> Edge:
+        target = self._make_node(node_class, state, self)
+        self.nodes.append(target)
+        return self.add_edge(source, target, outcome, note)
+
+    def create_nodes[D: NodeData](
+        self, source: Node, node_class: type[Node[D]], states: Iterable[NodeState[D]], outcome: str,
+    ) -> None:
+        """Create nodes with edges from the source, replacing its unapproved destinations."""
+        pending = [edge for edge in self.edges if edge.source is source and edge.status == EdgeStatus.PENDING
+                   and edge.outcome != 'rollback' and edge.target.status == NodeStatus.PENDING
+                   and not self.is_ready(edge.target)]
+        for state in states:
+            self.connect(source, node_class, state, outcome)
+
+        for edge in pending:
+            self.edges.remove(edge)
+        for target in {edge.target for edge in pending}:
+            if not any(edge.source is target or edge.target is target for edge in self.edges):
+                self.nodes.remove(target)
+
+    def add_edge(self, source: Node, target: Node, outcome: str, note: str = '') -> Edge:
+        if source not in self.nodes or target not in self.nodes:
+            raise ValueError('Both endpoints must belong to this graph.')
+        order = 1 + max((edge.outbound_order for edge in self.edges if edge.source is source), default=0)
+        edge = Edge(source, target, order, outcome, note)
+        self.edges.append(edge)
         return edge
 
-    def next_order(self, node_id: int) -> int:
-        return 1 + max((edge.outbound_order for edge in self._history if edge.from_node_id == node_id), default=0)
+    def predecessors(self, node: Node) -> list[Node]:
+        previous: list[Node] = []
+        pending = [node]
+        seen = {node}
+        while pending:
+            current = pending.pop(0)
+            for edge in reversed(self.edges):
+                if (edge.target is current and edge.status == EdgeStatus.APPROVED
+                        and edge.outcome != 'rollback' and edge.source not in seen):
+                    seen.add(edge.source)
+                    previous.append(edge.source)
+                    pending.append(edge.source)
+        return previous
 
-    def validate_dependencies(self) -> None:
-        """Check both kinds of prerequisites; transition history is not a DAG."""
-        from graphlib import CycleError, TopologicalSorter
+    def rollback(self, source_id: int, target_id: int, note: str) -> Edge:
+        source = self.select(source_id)
+        target = self.node(target_id)
+        self._check_rollback(source, target)
+        return self.add_edge(source, target, 'rollback', note.strip())
 
-        sorter = TopologicalSorter()
-        scopes = self.scopes()
-        for key, members in scopes.items():
-            sorter.add(('scope', key), *(('node', node.id) for node in members),
-                       *(('scope', child) for node in members for child in node.workflow.get('split', [])))
-        for node in self.nodes.values():
-            if node.status == 'superseded':
-                continue
-            after = node.workflow.get('after', [])
-            if any(self.node(key).status == 'superseded' for key in after):
-                raise ValueError('A prerequisite points to a superseded step.')
-            required = node.workflow.get('requires', [])
-            if any(key not in scopes for key in required + node.workflow.get('split', [])):
-                raise ValueError('A prerequisite points to a missing scope.')
-            sorter.add(('node', node.id), *(('node', key) for key in after),
-                       *(('scope', key) for key in required))
-        try:
-            sorter.prepare()
-        except CycleError as exc:
-            raise ValueError('Work prerequisites cannot contain a cycle.') from exc
+    def pending_edge(self, edge_id: int) -> Edge:
+        edge = next((edge for edge in self.edges if edge.id == edge_id), None)
+        if edge is None:
+            raise LookupError(f'Edge {edge_id} is outside this graph.')
+        if edge.status == EdgeStatus.APPROVED:
+            raise ValueError('This edge has already been approved.')
+        return edge
+
+    def approve_edge(self, edge_id: int, data: dict[str, object] | None = None) -> int | None:
+        """Approve an edge and return the destination ID if it needs its first turn."""
+        edge = self.pending_edge(edge_id)
+        if edge.source.status == NodeStatus.SUPERSEDED:
+            raise ValueError('The edge leaves a superseded node.')
+        if edge.source.status != NodeStatus.DONE and not self.is_ready(edge.source):
+            raise ValueError('The source node is not ready.')
+        if edge.outcome == 'rollback':
+            if data:
+                raise ValueError('Node data can only be edited when approving a destination’s first turn.')
+            self._check_rollback(edge.source, edge.target)
+            self._apply_rollback(edge.target)
+        elif edge.target.status != NodeStatus.PENDING:
+            raise ValueError('The destination is no longer pending.')
+        else:
+            if data:
+                if edge.target.state.conversation is not None:
+                    raise ValueError('The destination has already started its conversation.')
+                edge.target.update_data(data)
+            edge.source.state.status = NodeStatus.DONE
+        edge.status = EdgeStatus.APPROVED
+        if edge.outcome != 'rollback' and edge.target.state.conversation is None:
+            return edge.target.id
+        return None
+
+    def _check_rollback(self, source: Node, target: Node) -> None:
+        if target.status != NodeStatus.DONE or target not in self.predecessors(source):
+            raise ValueError('Choose a previous node on the path to the current node.')
+
+    def _apply_rollback(self, target: Node) -> None:
+        descendants = {target}
+        frontier = [target]
+        while frontier:
+            current = frontier.pop()
+            for edge in self.edges:
+                if edge.source is current and edge.outcome != 'rollback' and edge.target not in descendants:
+                    descendants.add(edge.target)
+                    frontier.append(edge.target)
+        for node in descendants - {target}:
+            node.state.status = NodeStatus.SUPERSEDED
+        target.state.status = NodeStatus.PENDING

@@ -1,20 +1,60 @@
-from enum import StrEnum
+from dataclasses import dataclass
 
-from harness.graph.state import Node
-from harness.graph.traverser import Outcome
+from pydantic_ai import ModelRetry, Tool
 
-
-class ReviewDecision(StrEnum):
-    ACCEPT = "accept"
-    FEEDBACK = "feedback"
-    REVISE = "revise"
-    REVIEW_EARLIER = "review_earlier"
-    RETURN = "return"
+from harness.git.repository import FileChange
+from harness.graph.node import Node, NodeData
 
 
-def record_review(node: Node, target: Node, decision: ReviewDecision, note: str = "") -> Outcome:
-    evidence = {"target_id": target.id, "note": note}
-    if target.commit_sha is not None:
-        evidence["reviewed_commit_sha"] = target.commit_sha
-    node.data = {**(node.data or {}), "last_decision": {"action": decision.value, **evidence}}
-    return Outcome(decision.value, evidence)
+@dataclass(kw_only=True)
+class ReviewData(NodeData):
+    reviewed_commit_sha: str | None = None
+    return_review_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.base_commit is None:
+            self.base_commit = self.reviewed_commit_sha
+
+
+class Review(Node[ReviewData]):
+    node_type = 'human_review'
+    data_type = ReviewData
+
+    def initial_prompt(self, message: str) -> tuple[str, str]:
+        instructions = (
+            'Discuss the completed step with the user and identify what still needs verification. '
+            'Use list_changed_files and get_file_diff to inspect changes. '
+            'Use the repository read tools when you need surrounding code.'
+        )
+        prompt = 'Review the saved result.'
+        if summary := self.state.data.summary:
+            prompt += f'\n\nSummary\n{summary}'
+        if message:
+            prompt += f'\n\nRequest\n{message}'
+        return instructions, prompt
+
+    def model_tools(self) -> tuple[str | Tool[None], ...]:
+        return 'read_file', 'list_files', 'grep', Tool(self.list_changed_files), Tool(self.get_file_diff)
+
+    def list_changed_files(self) -> list[dict[str, str | None]]:
+        """List repository paths and change statuses for the saved implementation under review."""
+        return [{'status': change.status, 'old_path': change.old_path, 'new_path': change.new_path}
+                for change in self._changed_files()]
+
+    def get_file_diff(self, path: str) -> dict[str, str | bool]:
+        """Read a saved diff by its new path, or by its old path if the file was deleted."""
+        for change in self._changed_files():
+            if (change.new_path or change.old_path) == path:
+                return self.graph.workspace.repository.file_diff(change)
+        raise ModelRetry('Choose a path returned by list_changed_files.')
+
+    def _changed_files(self) -> list[FileChange]:
+        source = self.graph.creation_edge(self).source
+        base = source.state.data.base_commit
+        commit = self.state.data.reviewed_commit_sha or source.state.commit_sha
+        if not base or not commit:
+            raise ModelRetry('This review has no saved Git comparison.')
+        repository = self.graph.workspace.repository
+        return [change for change in repository.changed_files(base, commit)
+                if all(repository.is_readable_path(path) for path in (change.old_path, change.new_path)
+                       if path is not None)]

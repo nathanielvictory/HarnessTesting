@@ -1,5 +1,6 @@
 import subprocess
 from dataclasses import dataclass
+from functools import cached_property
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -128,12 +129,16 @@ class GitRepository:
             return f"Subproject commit {object_id}\n"
         return _git(self.path, "cat-file", "blob", object_id)
 
-    def read_text_file(self, revision: str, path: str) -> str:
+    @staticmethod
+    def is_readable_path(path: str) -> bool:
         parts = path.split("/")
-        if "\\" in path or any(ord(char) < 32 for char in path) or any(
+        return not ("\\" in path or any(ord(char) < 32 for char in path) or any(
             part.casefold() in {"", ".", "..", ".git", ".env"} or part.casefold().startswith(".env.")
             for part in parts
-        ):
+        ))
+
+    def read_text_file(self, revision: str, path: str) -> str:
+        if not self.is_readable_path(path):
             raise ValueError("Choose a repository-relative file path.")
         spec = f"{self.commit_sha(revision)}:{path}"
         try:
@@ -174,6 +179,29 @@ class GitRepository:
         if final:
             _git(self.path, 'update-ref', f'refs/harness/results/{item_id}', result)
         return result
+
+class GitWorkspace:
+    def __init__(self, repository_path: Path, worktrees: Path, item_id: int, title: str | None) -> None:
+        self.repository_path = repository_path
+        self.worktrees = worktrees
+        self.item_id = item_id
+        self.title = title
+
+    @cached_property
+    def repository(self) -> GitRepository:
+        return GitRepository(self.repository_path)
+
+    def prepare(self, node_id: int, branch_ref: str | None, base: str | None) -> tuple[Path, str, str]:
+        repository = self.repository
+        commit = base or repository.commit_sha()
+        checkout = self.worktrees / 'items' / str(self.item_id)
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        branch_ref = branch_ref or f'refs/heads/harness/{self.item_id}-{node_id}'
+        path = repository.open_worktree(checkout, branch_ref, commit, legacy_path=self.worktrees / str(node_id))
+        return path, branch_ref, commit
+
+    def save(self, checkout: Path) -> str:
+        return self.repository.save_commit(checkout, self.title or f'Work item {self.item_id}')
 
 def _json_text(text: str) -> str:
     return text.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")

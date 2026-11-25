@@ -4,26 +4,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic_ai import Agent, RunContext, capture_run_conversation
+from pydantic_ai import Agent, RunContext, Tool, capture_run_conversation
 from pydantic_ai.capabilities import AgentCapability, LocalWorkspace, WindowsWorkspace
 from pydantic_ai.conversation import ConversationTypeAdapter
 from pydantic_ai.exceptions import RunCancelled
-from pydantic_ai.messages import FunctionToolCallEvent, ModelResponse
+from pydantic_ai.messages import FunctionToolCallEvent, ModelRequest, ModelResponse, SystemPromptPart
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai_harness.file_system import FileSystem
 from pydantic_ai_harness.spend_limits import SpendLimits, SpendRecordedEvent
 
 from harness.persistence.usage import UsageRepository
-
-
-READ_ONLY_FILE_TOOLS = ("read_file", "list_files", "grep")
-
-
-@dataclass(frozen=True)
-class AgentProfile:
-    instructions: str
-    file_tools: tuple[str, ...] = ()
-    capabilities: tuple[AgentCapability[None], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,23 +34,33 @@ class AgentHarness:
         self,
         prompt: str,
         *,
-        profile: AgentProfile,
+        instructions: str | None = None,
         node_id: int | None = None,
         model: str | None = None,
         conversation: dict[str, Any] | None = None,
         worktree: Path | None = None,
         progress: Callable[[str], None] | None = None,
+        tools: tuple[str | Tool[None], ...] = (),
     ) -> AgentTurn:
         prior = ConversationTypeAdapter.validate_python(conversation) if conversation is not None else None
-        capabilities = list(profile.capabilities)
+        if prior is not None:
+            first_request = next((message for message in prior.messages if isinstance(message, ModelRequest)), None)
+            if first_request and first_request.instructions and not any(
+                isinstance(part, SystemPromptPart) for part in first_request.parts
+            ):
+                # Existing conversations recorded the profile instructions on the request itself.
+                first_request.parts = [SystemPromptPart(first_request.instructions), *first_request.parts]
+        file_tools = tuple(tool for tool in tools if isinstance(tool, str))
+        function_tools = tuple(tool for tool in tools if isinstance(tool, Tool))
+        capabilities: list[AgentCapability[None]] = []
         selected_model = model or self.model
         usage = self.usage
         if usage is not None and node_id is not None:
             capabilities.append(SpendLimits())
         workspace_override: Literal["new"] | None = None
-        if profile.file_tools:
+        if file_tools:
             if worktree is None:
-                raise ValueError("A profile with file tools needs a workspace path")
+                raise ValueError("File tools need a workspace path")
             workspace = WindowsWorkspace(worktree) if sys.platform == "win32" else LocalWorkspace(worktree)
             if prior is not None:
                 last_response = next((message for message in reversed(prior.messages) if isinstance(message, ModelResponse)), None)
@@ -70,7 +70,7 @@ class AgentHarness:
             capabilities.extend([
                 workspace,
                 FileSystem(
-                    tools=profile.file_tools,
+                    tools=file_tools,
                     denied_patterns=["**/.git", "**/.env", "**/.env.*"],
                 ),
             ])
@@ -80,8 +80,8 @@ class AgentHarness:
                     progress(event.part.tool_name)
 
         agent = Agent(
-            selected_model, instructions=profile.instructions,
-            capabilities=capabilities, model_settings=self.model_settings,
+            selected_model, system_prompt=instructions or (),
+            capabilities=capabilities, model_settings=self.model_settings, tools=function_tools,
         )
         if usage is not None and node_id is not None:
             provider, separator, _ = selected_model.partition(":")

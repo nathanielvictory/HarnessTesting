@@ -59,6 +59,7 @@ export function WorkItemScreen({ detail, busy, perform }: Props) {
           <p className="empty">{readyIds.length ? 'Choose the step you want to work on.'
             : 'No steps are ready. Review the blockers and graph history.'}</p>}
       </div>
+      {!done && selectedNode?.pending_transition && <TransitionApproval node={selectedNode} busy={busy} perform={perform} />}
     </div>
     <GraphHistory detail={detail} selectedId={selectedNode?.id} expanded={historyOpen} selectNode={id => {
       if (readyIds.includes(id)) {
@@ -90,6 +91,24 @@ function stepLabel(detail: WorkItemDetail, id: number) {
   return `#${id} ${nodeLabel(node)}${node?.scope_brief ? ` · ${node.scope_brief}` : ''}`;
 }
 
+function TransitionApproval({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & { node: WorkNode }) {
+  const request = node.pending_transition;
+  if (!request) return null;
+  const destinations = request.edges.map(edge => {
+    const destination = edge.scope_brief || nodeLabel(edge);
+    return `${edge.outcome.replaceAll('_', ' ')} → ${destination}${edge.note ? ` · ${edge.note}` : ''}`;
+  });
+  return <div className="step-footer transition-approval">
+    {destinations.length > 1 ? <details>
+      <summary>{destinations.length} requested transitions</summary>
+      <ul>{destinations.map((destination, index) => <li key={index}>{destination}</li>)}</ul>
+    </details> : <span>{request.accept ? 'Accept this piece' : destinations[0]}</span>}
+    <button className="primary" disabled={busy} onClick={() => perform({
+      type: 'approve', node_id: node.id, request_id: request.id,
+    })}>{request.accept ? 'Approve acceptance' : 'Approve transition'}</button>
+  </div>;
+}
+
 function ScopeForm({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & { node: WorkNode }) {
   const [pieces, setPieces] = useState([{ brief: '', dependencies: '' }]);
   const [split, setSplit] = useState(false);
@@ -107,7 +126,7 @@ function ScopeForm({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & { 
         return;
       }
       setError('');
-      perform(split ? { type: 'approve', node_id: node.id, pieces: batch }
+      perform(split ? { type: 'delegate', node_id: node.id, pieces: batch }
         : { type: 'discover', node_id: node.id, pieces: batch });
     }}>
       {pieces.map((piece, index) => <fieldset key={index} disabled={busy}>
@@ -123,10 +142,10 @@ function ScopeForm({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & { 
       {pieces.length > 1 && <button type="button" disabled={busy} onClick={() => setPieces(rows => rows.slice(0, -1))}>Remove last piece</button>}
       {node.node_type === 'technical_planning' && node.data?.draft && <label>
         <input type="checkbox" checked={split} disabled={busy} onChange={event => setSplit(event.target.checked)} />
-        Approve this plan and delegate its implementation to these pieces
+        Delegate this plan’s implementation to these pieces
       </label>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy}>{split ? 'Approve and delegate' : 'Pause step and add prerequisites'}</button>
+      <button disabled={busy}>{split ? 'Request delegation' : 'Request prerequisites'}</button>
     </form>
   </details>;
 }
@@ -141,7 +160,7 @@ function ReopenForm({ node, busy, perform }: Pick<Props, 'busy' | 'perform'> & {
       if (note.trim()) perform({ type: 'reopen', node_id: node.id, note });
     }}>
       <label>What should change? <textarea required disabled={busy} value={note} onChange={event => setNote(event.target.value)} /></label>
-      <button disabled={busy || !note.trim()}>Reopen</button>
+      <button disabled={busy || !note.trim()}>Request reopening</button>
     </form>
   </details>;
 }

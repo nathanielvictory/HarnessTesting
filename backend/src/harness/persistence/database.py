@@ -22,6 +22,13 @@ class Database:
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         Base.metadata.create_all(self.engine)
+        with self.engine.begin() as connection:
+            edges = connection.exec_driver_sql('PRAGMA table_info(edges)').fetchall()
+            if not any(column[1] == 'status' for column in edges):
+                connection.exec_driver_sql("ALTER TABLE edges ADD COLUMN status VARCHAR NOT NULL DEFAULT 'approved'")
+            nodes = connection.exec_driver_sql('PRAGMA table_info(nodes)').fetchall()
+            if not any(column[1] == 'status' for column in nodes):
+                connection.exec_driver_sql('ALTER TABLE nodes ADD COLUMN status VARCHAR')
 
     def session(self) -> AbstractContextManager[Session]:
         """Commit on successful exit, roll back on error, and close the session."""

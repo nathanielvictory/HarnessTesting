@@ -4,35 +4,34 @@ This document describes the current implementation. See the [product description
 
 ## Entry points and application boundaries
 
-- The **browser** uses React and TypeScript. It calls the FastAPI endpoints through the Vite proxy. The frontend owns project and work item selection, conversation display, and review controls. The backend returns the graph, the ordered ready list, and blocker reasons.
-- The browser displays the status of its current request and updates the work item from the response. Reopening a work item loads changes made through other entry points. Repository links in agent Markdown open files from the step's saved Git snapshot. Implementation review lists the files changed since the approved plan's baseline and loads a side-by-side comparison for the selected file from the saved commit.
-- **FastAPI and MCP** call the same [application service](../backend/src/harness/application.py) for catalog and work item operations. MCP exposes those operations over Streamable HTTP. The service permits one mutation per work item at a time within a server process.
-- [WorkSession](../backend/src/harness/operations/work_session.py) coordinates the operations for one work item. Every node command targets an explicit ID. For agent-driven nodes, startup builds the initial prompt and follow-up sends a message in the saved conversation. The [traverser](../backend/src/harness/graph/traverser.py) validates readiness and persists the outcome for the specified node.
+- The browser uses React and TypeScript and calls FastAPI through the Vite proxy. The backend exposes the graph, conversations, ready nodes, blocker reasons, and per-file Git diffs.
+- FastAPI and MCP use [Harness](../backend/src/harness/application.py) for commands and [HarnessQueries](../backend/src/harness/queries.py) for reads. A server process runs one command per work item at a time.
+- Model turns run in the background. HTTP `POST /api/work-items/{item_id}/messages` returns `202` when it accepts a follow-up. HTTP `GET /api/work-items/{item_id}/activity` and MCP `work_item_activity` report `running`, `done`, or `failed`, with recent tool names and any error. Activity lives in memory for the life of the server process.
+- `POST /api/work-items/{item_id}/retry` with a `node_id` retries a ready node whose first turn did not save a conversation.
 
 ## Graph and persistence
 
-A project identifies a registered repository and groups work items. Creating a work item creates its goal alignment entry node. The graph repository loads the item's nodes and edges into an in-memory graph. Readiness comes from pending step state and prerequisites, not the transition log. Execution prerequisites refer to steps; acceptance prerequisites refer to stable scopes anchored at their original brief. Transition edges record what happened, including interrupted and replaced attempts. Legacy linear graphs recover their lifecycle from recorded transitions.
+A project identifies a registered Git repository and groups work items. Creating a work item saves the opening message on its Goal Alignment entry node and starts its first turn. The graph tracks node status and edge approval separately. A pending node is ready if it is the entry node or has an approved incoming edge.
 
-SQLAlchemy maps projects, work items, nodes, and edges to SQLite. The graph repository maps those records to the graph's Python objects and saves node state and transitions together. Agent-driven nodes can save their model, conversation, and node-specific data. Nodes can also save a branch ref and commit SHA. The API and MCP expose visible messages and graph history from this state.
+SQLAlchemy maps projects, work items, nodes, and edges to SQLite. The graph repository restores concrete nodes with their saved data and conversations. The nodes share a graph and model runtime. Each graph has a Git workspace for its work item.
 
-The shared agent runner records Pydantic AI Harness `SpendLimits` events in SQLite as model responses arrive. Each record belongs to a graph node. The browser shows totals for the selected work item and project, including tokens and an estimated cost at API rates. For Codex subscription runs, that estimate describes equivalent API usage. Recording starts with new agent turns and runs without a spend ceiling.
+The shared agent runner records Pydantic AI Harness `SpendLimits` events in SQLite as model responses arrive. Each record belongs to a graph node. The API exposes work-item and project usage totals, including tokens and estimated cost at API rates. For Codex subscription runs, that estimate describes equivalent API usage.
 
 ## Path implemented today
 
-The straight-line flow is brief → plan → implementation → review. At plan approval, the developer can instead delegate implementation to scoped pieces, each with its own path. Batch prerequisites name the pieces that need to be accepted before another can start. New nodes, prerequisites, and history are persisted in one transaction; dependency cycles roll back the batch.
+Goal Alignment creates a Technical Planning node. Technical Planning can create an Implementation node or multiple Goal Alignment nodes. Implementation can create a Review node after saving its changes. Creation records destination nodes and pending edges. When the source creates a new set, the graph replaces its earlier unapproved destinations and keeps the approved history.
 
-Any ready step can add scoped prerequisites and wait for their acceptance. Implementation can also report missing prerequisites; Harness commits its edits and saves its conversation before opening the new briefs. The continuation starts on a separate branch with the saved edits and accepted prerequisite commits. The original attempt remains available in history. Reopening a brief, plan, or implementation replaces that step, invalidates dependent results, and leaves independent accepted work intact.
+Approval identifies an edge by ID. The same request can edit the destination's input data before its first turn starts. A user can continue an existing conversation on a node that has not been superseded, including a completed node.
 
-Accepting a review accepts its piece. Normal completion requires acceptance across the entire graph and a successful Git integration. The result is available at `refs/harness/results/<item-id>`; the developer’s original checkout is unchanged. An integration conflict keeps the review actionable and does not complete the item. The browser and MCP still offer explicit closure without acceptance or an integrated result.
+Rollback creates a pending edge to a completed predecessor. Approval makes that predecessor's existing conversation available again and marks its descendants superseded. Their history remains available. Closing a work item updates its status independently of the graph and Git.
 
 ## Agent context and Git
 
-The [agent harness](../backend/src/harness/agents/harness.py) adapts Pydantic AI and restores the node's saved conversation for a new turn. Each operation supplies its own agent profile and builds the prompt for the turn.
+The [agent harness](../backend/src/harness/agents/harness.py) adapts Pydantic AI and restores the node's saved conversation. Each node supplies its own tools and builds its instructions and opening message.
 
-- **Goal alignment** can list, search, and read repository files in the work item checkout at the Git baseline.
-- **Technical planning** receives the approved brief and uses the same read-only tools against the baseline plus accepted prerequisites.
-- **Implementation** receives the approved brief and plan, plus review feedback when applicable. It can read and edit files in the same checkout. Harness creates any resulting commit and records the branch ref and SHA.
+- **Goal Alignment** can list, search, and read repository files at its Git baseline.
+- **Technical Planning** receives the brief and can read files at its saved baseline.
+- **Implementation** receives the brief, plan, and any feedback. It can read and edit files. Its Git workspace saves the resulting commit, and the node records the branch and SHA.
+- **Review** stores the commit it reviews. A new Review can read, list, and search files in the saved implementation snapshot.
 
-Each work item uses a fixed checkout under `worktrees/items/` in the state directory and switches branches between steps. Harness reuses the checkout across turns and restarts, and recreates a missing checkout from the saved commit. On resumption, Harness checks that the branch still points to the saved SHA. Review decisions record the exact commit reviewed. Snapshot integration runs in a temporary detached worktree so a conflicting merge cannot change the saved step branches.
-
-Run the Git-backed frontier regression suite with `cd backend && uv run python -m unittest -v test_frontier`.
+Each work item uses a fixed checkout under `worktrees/items/` in the state directory and switches branches between nodes. Harness reuses the checkout across turns and restarts, and recreates a missing checkout from the saved commit. On resumption, Harness checks that the branch still points to the saved SHA. For a Review diff, the query gets the baseline from the Implementation node on the incoming creation edge and compares it to Review's saved commit.

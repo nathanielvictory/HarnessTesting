@@ -10,15 +10,15 @@ from pydantic_ai.exceptions import AgentRunError, UserError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from harness.agents.harness import AgentHarness
-from harness.application import Harness, WorkItemConflict
+from harness.application import ActiveCommands, CommandActivity, Harness, WorkItemConflict
 from harness.git.repository import GitError
-from harness.operations.review import ReviewDecision
-from harness.operations.work_session import ScopedWork
-from harness.persistence.catalog import ProjectEntry, WorkItemEntry
+from harness.persistence.catalog import Catalog, ProjectEntry, WorkItemEntry
 from harness.persistence.database import Database
+from harness.persistence.graph.repository import GraphRepository
 from harness.persistence.models import WorkItemStatus
-from harness.persistence.usage import UsageSummary
-from harness.runtime import RuntimeSettings
+from harness.persistence.usage import UsageRepository, UsageSummary
+from harness.queries import HarnessQueries
+from harness.runtime import RuntimeSettings, model_settings
 
 from .mcp_server import build_mcp
 
@@ -29,6 +29,7 @@ class ProjectRequest(BaseModel):
 
 
 class WorkItemRequest(BaseModel):
+    message: str
     title: str | None = None
 
 
@@ -36,38 +37,33 @@ class NodeRequest(BaseModel):
     node_id: int
 
 
-class StartRequest(NodeRequest):
-    message: str = ""
-
-
 class MessageRequest(NodeRequest):
     message: str
 
 
-class ScopedRequest(NodeRequest):
-    pieces: list[ScopedWork]
+class ApprovalRequest(BaseModel):
+    edge_id: int
+    data: dict[str, object] | None = None
 
 
-class ApprovalRequest(NodeRequest):
-    pieces: list[ScopedWork] | None = None
-
-
-class ReopenRequest(BaseModel):
-    node_id: int
+class RollbackRequest(NodeRequest):
+    target_id: int
     note: str
-
-
-class ReviewRequest(NodeRequest):
-    decision: ReviewDecision
-    note: str = ""
-    earlier_id: int | None = None
 
 
 def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness | None = None) -> FastAPI:
     settings = settings or RuntimeSettings.from_environment()
     database = Database(settings.state_dir / "harness.sqlite3")
-    harness = Harness(database, settings, agents=agents)
-    mcp = build_mcp(harness)
+    usage = UsageRepository(database)
+    agent = agents if agents is not None else AgentHarness(
+        settings.model, model_settings=model_settings(settings.model), usage=usage,
+    )
+    catalog = Catalog(database)
+    graphs = GraphRepository(database, agent, settings.state_dir / 'worktrees')
+    active = ActiveCommands()
+    harness = Harness(catalog, graphs, active)
+    queries = HarnessQueries(catalog, graphs, usage, active)
+    mcp = build_mcp(harness, queries)
     mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True)
 
     @asynccontextmanager
@@ -77,6 +73,7 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
             async with mcp.session_manager.run():
                 yield
         finally:
+            harness.shutdown()
             database.close()
 
     app = FastAPI(title="Harness", lifespan=lifespan)
@@ -105,7 +102,7 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
 
     @app.get("/api/projects")
     def projects() -> list[ProjectEntry]:
-        return harness.projects()
+        return queries.projects()
 
     @app.post("/api/projects", status_code=201)
     def register_project(body: ProjectRequest) -> ProjectEntry:
@@ -113,31 +110,31 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
 
     @app.get("/api/projects/{project_id}/usage")
     def project_usage(project_id: int) -> UsageSummary:
-        return harness.project_usage(project_id)
+        return queries.project_usage(project_id)
 
     @app.get("/api/projects/{project_id}/work-items")
     def work_items(project_id: int, status: WorkItemStatus = WorkItemStatus.IN_PROGRESS) -> list[WorkItemEntry]:
-        return harness.work_items(project_id, status)
+        return queries.work_items(project_id, status)
 
     @app.post("/api/projects/{project_id}/work-items", status_code=201)
     def create_work_item(project_id: int, body: WorkItemRequest) -> WorkItemEntry:
-        return harness.create_work_item(project_id, body.title)
+        return harness.create_work_item(project_id, body.message, body.title)
 
     @app.get("/api/work-items/{item_id}")
     def inspect(item_id: int) -> dict:
-        return harness.inspect(item_id)
+        return queries.inspect(item_id)
 
     @app.get("/api/work-items/{item_id}/usage")
     def work_item_usage(item_id: int) -> UsageSummary:
-        return harness.work_item_usage(item_id)
+        return queries.work_item_usage(item_id)
 
     @app.get("/api/work-items/{item_id}/activity")
-    def activity(item_id: int) -> dict | None:
-        return harness.activity(item_id)
+    def activity(item_id: int) -> CommandActivity | None:
+        return queries.activity(item_id)
 
     @app.get("/api/work-items/{item_id}/nodes/{node_id}/file", response_class=HTMLResponse)
     def repository_file(item_id: int, node_id: int, path: str = Query(max_length=4096)) -> HTMLResponse:
-        content = harness.repository_file(item_id, node_id, path)
+        content = queries.repository_file(item_id, node_id, path)
         filename = escape(path)
         lines = "".join(
             f'<span id="L{number}"><a href="#L{number}">{number}</a>{escape(line)}\n</span>'
@@ -157,39 +154,36 @@ def create_app(settings: RuntimeSettings | None = None, *, agents: AgentHarness 
 
     @app.get("/api/work-items/{item_id}/nodes/{node_id}/diff")
     def implementation_diff(item_id: int, node_id: int) -> dict:
-        return harness.implementation_diff(item_id, node_id)
+        return queries.implementation_diff(item_id, node_id)
 
     @app.get("/api/work-items/{item_id}/nodes/{node_id}/diff/files/{file_index}")
     def implementation_file_diff(item_id: int, node_id: int, file_index: int, commit: str) -> dict:
-        return harness.implementation_file_diff(item_id, node_id, file_index, commit)
+        return queries.implementation_file_diff(item_id, node_id, file_index, commit)
 
     @app.post("/api/work-items/{item_id}/close")
     def close_work_item(item_id: int) -> dict:
-        return harness.close_work_item(item_id)
+        harness.close_work_item(item_id)
+        return queries.inspect(item_id)
 
-    @app.post("/api/work-items/{item_id}/start")
-    def start(item_id: int, body: StartRequest) -> dict:
-        return harness.start(item_id, body.node_id, body.message)
-
-    @app.post("/api/work-items/{item_id}/messages")
+    @app.post("/api/work-items/{item_id}/messages", status_code=202)
     def follow_up(item_id: int, body: MessageRequest) -> dict:
-        return harness.follow_up(item_id, body.node_id, body.message)
+        harness.follow_up(item_id, body.node_id, body.message)
+        return queries.inspect(item_id)
+
+    @app.post("/api/work-items/{item_id}/retry", status_code=202)
+    def retry(item_id: int, body: NodeRequest) -> dict:
+        harness.retry(item_id, body.node_id)
+        return queries.inspect(item_id)
 
     @app.post("/api/work-items/{item_id}/approve")
     def approve(item_id: int, body: ApprovalRequest) -> dict:
-        return harness.approve(item_id, body.node_id, body.pieces)
+        harness.approve_edge(item_id, body.edge_id, body.data)
+        return queries.inspect(item_id)
 
-    @app.post('/api/work-items/{item_id}/discover')
-    def discover(item_id: int, body: ScopedRequest) -> dict:
-        return harness.discover(item_id, body.pieces, body.node_id)
-
-    @app.post('/api/work-items/{item_id}/reopen')
-    def reopen(item_id: int, body: ReopenRequest) -> dict:
-        return harness.reopen(item_id, body.node_id, body.note)
-
-    @app.post("/api/work-items/{item_id}/review")
-    def review(item_id: int, body: ReviewRequest) -> dict:
-        return harness.review(item_id, body.node_id, body.decision, body.note, body.earlier_id)
+    @app.post('/api/work-items/{item_id}/rollback')
+    def rollback(item_id: int, body: RollbackRequest) -> dict:
+        harness.rollback(item_id, body.node_id, body.target_id, body.note)
+        return queries.inspect(item_id)
 
     app.mount("/", mcp_app)
     return app

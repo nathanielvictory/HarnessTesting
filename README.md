@@ -66,11 +66,14 @@ Keep the backend running and register its local Streamable HTTP endpoint.
 codex mcp add harness --url http://127.0.0.1:8000/mcp
 ```
 
-The MCP tools inspect and act on the same projects and work items as the web app.
-Use `inspect_work_item` to find the ready node's ID and whether it has a saved
-conversation. Pass the node ID to `start_node` for its first turn or to
-`send_message` for a follow-up. Approval, discovery, and review also require a
-node ID.
+Use `create_work_item` with an opening message to start Goal Alignment.
+`inspect_work_item` returns the graph and saved conversations. Use `send_message`
+with a node ID for a follow-up, or `approve_edge` with an edge ID to approve a
+transition. Approval starts a destination's first turn when needed.
+`work_item_activity` reports the current or most recent turn.
+
+To retry a failed first turn through HTTP, send `POST /api/work-items/{item_id}/retry`
+with `{"node_id": 123}`. The node must be ready and have no saved conversation.
 
 ## Inspect a work item checkout
 

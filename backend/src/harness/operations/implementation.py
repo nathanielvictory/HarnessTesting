@@ -1,84 +1,69 @@
-import json
-from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Annotated
 
-from harness.agents.harness import AgentHarness, AgentProfile
-from harness.graph.state import Edge, Graph, Node
-from harness.graph.traverser import Edit, NewNode, Outcome
+from pydantic import StringConstraints
+from pydantic_ai import Tool
 
+from harness.agents.harness import AgentTurn
+from harness.graph.node import Node, NodeData, NodeState
 
-PROFILE = AgentProfile(
-    instructions=(
-        "Implement the approved brief and technical plan in the assigned checkout. "
-        "Address review feedback when provided. The harness saves the Git commit. "
-        "If work cannot continue without separately scoped prerequisites, stop with your edits saved "
-        "and put PREREQUISITES: followed by a JSON array of short scoped briefs on the last line. "
-        "Otherwise finish with a concise summary of changes and anything left to verify."
-    ),
-    file_tools=("read_file", "list_files", "grep", "edit_file", "write_file"),
-)
+from .review import Review, ReviewData
 
 
-class Implementation(Node):
-    def init(self, graph: Graph, message: str, worktree: Path, agents: AgentHarness,
-             save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
-        data = self.data or {}
-        plan = graph.node(data['plan_id'])
-        plan_data = plan.data or {}
-        goal = graph.node(plan_data['goal_id'])
-        brief = (goal.data or {})['approved']
-        prompt = f"Approved brief\n{brief}\n\nApproved technical plan\n{plan_data['approved']}"
-        if data.get("revision_note"):
-            prompt += f"\n\nRevision request\n{data['revision_note']}"
-        if data.get("paused"):
-            prompt += "\n\nContinue the interrupted implementation from the saved checkout."
-        feedback = data.get('feedback') or next((
-            (edge.data or {}).get('note') for edge in reversed(graph.history())
-            if edge.to_node_id == self.id and edge.outcome == 'feedback'
-        ), None)
-        if feedback:
-            prompt += f"\n\nReview feedback\n{feedback}"
-        if message and message != feedback:
-            prompt += f"\n\nRequest\n{message}"
-        return self._turn(prompt, worktree, agents, save_commit, progress)
+@dataclass(kw_only=True)
+class ImplementationData(NodeData):
+    brief: str
+    plan: str
+    paused: bool = False
+    feedback: str | None = None
+    revision_note: str | None = None
 
-    def follow_up(self, _graph: Graph, message: str, worktree: Path, agents: AgentHarness,
-                  save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
-        return self._turn(message, worktree, agents, save_commit, progress)
 
-    def _turn(self, prompt: str, worktree: Path, agents: AgentHarness, save_commit: Callable[[Path], str],
-              progress: Callable[[str], None] | None) -> Outcome:
-        model = agents.model
-        data = self.data or {}
-        result = agents.run_turn(
-            prompt, profile=PROFILE, model=model, conversation=self.conversation, worktree=worktree,
-            node_id=self.id, progress=progress,
+class Implementation(Node[ImplementationData]):
+    node_type = 'implementation'
+    data_type = ImplementationData
+    saves_changes = True
+    _review_summary: str | None = None
+
+    def initial_prompt(self, message: str) -> tuple[str, str]:
+        instructions = (
+            "Implement the brief and technical plan in the assigned checkout. "
+            "Address review feedback when provided. The harness saves the Git commit. "
+            "Finish with a concise summary of changes and anything left to verify. Report anything that blocks the work. "
+            "When the work is ready for review, call create_review_node with the summary. "
+            "Call it again if the user wants to send an updated result for review."
         )
-        self.commit_sha = save_commit(worktree)
-        self.model = model
-        self.conversation = result.conversation
-        if result.paused:
-            self.data = {**data, "paused": True}
-            return Outcome("paused")
-        self.data = {**data, "paused": False, "summary": result.output}
-        _, _, last_line = result.output.rstrip().rpartition('\n')
-        if last_line.startswith('PREREQUISITES:'):
-            try:
-                briefs = json.loads(last_line.removeprefix('PREREQUISITES:'))
-            except json.JSONDecodeError:
-                briefs = None
-            if isinstance(briefs, list) and briefs and all(isinstance(brief, str) and brief.strip() for brief in briefs):
-                return Outcome('blocked', {'briefs': briefs})
-        return Outcome("review")
+        data = self.state.data
+        prompt = f"Brief\n{data.brief}\n\nTechnical plan\n{data.plan}"
+        if data.revision_note:
+            prompt += f"\n\nRevision request\n{data.revision_note}"
+        if data.paused:
+            prompt += "\n\nContinue the interrupted implementation from the saved checkout."
+        if data.feedback:
+            prompt += f"\n\nReview feedback\n{data.feedback}"
+        if message and message != data.feedback:
+            prompt += f"\n\nRequest\n{message}"
+        return instructions, prompt
 
-    def apply_turn(self, edit: Edit, outcome: Outcome, suspend: Callable[[Edit, Node, list[str]], Edge],
-                   successor: Callable[[Edit, Node, NewNode, Outcome], Edge]) -> Edge | None:
-        if outcome.name == 'blocked':
-            return suspend(edit, self, outcome.data['briefs'])
-        if outcome.name == 'review':
-            return successor(edit, self, NewNode('human_review', {'target_id': self.id}), outcome)
-        return None
+    def model_tools(self) -> tuple[str | Tool[None], ...]:
+        return (
+            'read_file', 'list_files', 'grep', 'edit_file', 'write_file',
+            Tool(self.create_review_node, sequential=True),
+        )
 
-    def continuation(self) -> NewNode:
-        return NewNode(self.node_type, {**(self.data or {}), 'paused': True}, commit_sha=self.commit_sha,
-                       conversation=self.conversation)
+    def create_review_node(
+        self, summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)],
+    ) -> str:
+        """Create a review node for the saved changes and summary at the end of this turn."""
+        self._review_summary = summary
+        return 'A review node will be created for the saved result of this turn.'
+
+    def _run(self, prompt: str, *, instructions: str | None = None) -> AgentTurn:
+        self._review_summary = None
+        reply = super()._run(prompt, instructions=instructions)
+        if self._review_summary is not None and not reply.paused:
+            data = ReviewData(
+                reviewed_commit_sha=self.state.commit_sha, summary=self._review_summary,
+            )
+            self.graph.create_nodes(self, Review, [NodeState(data)], 'review')
+        return reply

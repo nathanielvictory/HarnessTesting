@@ -18,6 +18,11 @@ export interface WorkNode {
   status: 'pending' | 'done' | 'superseded';
   scope_id: number;
   scope_brief: string | null;
+  pending_transition: {
+    id: string;
+    accept: boolean;
+    edges: { outcome: string; node_type: string; scope_brief: string | null; note: string | null }[];
+  } | null;
   data: {
     scope_brief?: string;
     draft?: string;
@@ -92,7 +97,8 @@ export interface ScopedWork {
 export type WorkItemCommand = { type: 'close' } | ({ node_id: number } & (
   | { type: 'start'; message?: string }
   | { type: 'messages'; message: string }
-  | { type: 'approve'; pieces?: ScopedWork[] }
+  | { type: 'approve'; request_id: string }
+  | { type: 'delegate'; pieces: ScopedWork[] }
   | { type: 'discover'; pieces: ScopedWork[] }
   | { type: 'reopen'; note: string }
   | { type: 'review'; decision: ReviewDecision; note: string; earlier_id: number | null }

@@ -17,7 +17,7 @@ class NodeType(StrEnum):
     GOAL_ALIGNMENT = "goal_alignment"
     TECHNICAL_PLANNING = "technical_planning"
     IMPLEMENTATION = "implementation"
-    HUMAN_REVIEW = "human_review"
+    REVIEW = "human_review"
 
     AUTOMATED_REVIEW = "automated_review"
     RUN_PYTHON = "run_python"
@@ -46,6 +46,7 @@ class Node(Base):
     conversation: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
     branch_ref: Mapped[str | None]
     commit_sha: Mapped[str | None]
+    status: Mapped[str | None]
     data: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
 
     work_item: Mapped[WorkItem] = relationship(back_populates="nodes", foreign_keys=[work_item_id])

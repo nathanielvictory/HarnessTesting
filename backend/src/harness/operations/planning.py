@@ -1,56 +1,60 @@
-from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Annotated
 
-from harness.agents.harness import AgentHarness, AgentProfile, READ_ONLY_FILE_TOOLS
-from harness.graph.state import Graph, Node
-from harness.graph.traverser import NewNode, Outcome
+from pydantic import Field, StringConstraints
+from pydantic_ai import Tool
 
+from harness.graph.node import Node, NodeData, NodeState
 
-PROFILE = AgentProfile(
-    instructions=(
-        "Propose a concise technical plan for the approved brief. Inspect the repository as needed. "
-        "Identify the affected components, implementation steps, and verification. "
-        "If the work would benefit from separately reviewed pieces, list their briefs and "
-        "name any prerequisites explicitly so the developer can delegate them when approving. "
-        "If the user asks for changes, reply with the complete revised plan."
-    ),
-    file_tools=READ_ONLY_FILE_TOOLS,
-)
+from .implementation import Implementation, ImplementationData
 
 
-class TechnicalPlanning(Node):
-    def init(self, graph: Graph, message: str, worktree: Path, agents: AgentHarness,
-             _save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
-        data = self.data or {}
-        goal = graph.node(data['goal_id'])
-        brief = (goal.data or {})['approved']
-        message = message or 'Draft the technical plan.'
-        if data.get("previous_plan"):
-            message = f"Previous plan\n{data['previous_plan']}\n\nRevision request\n{message}"
-        return self._turn(f"Approved brief\n{brief}\n\nRequest\n{message}", worktree, agents, progress)
+@dataclass(kw_only=True)
+class TechnicalPlanningData(NodeData):
+    brief: str
 
-    def follow_up(self, _graph: Graph, message: str, worktree: Path, agents: AgentHarness,
-                  _save_commit: Callable[[Path], str], progress: Callable[[str], None] | None) -> Outcome:
-        return self._turn(message, worktree, agents, progress)
 
-    def _turn(self, message: str, worktree: Path, agents: AgentHarness,
-              progress: Callable[[str], None] | None) -> Outcome:
-        model = agents.model
-        result = agents.run_turn(
-            message, profile=PROFILE, model=model, conversation=self.conversation, worktree=worktree,
-            node_id=self.id, progress=progress,
+class TechnicalPlanning(Node[TechnicalPlanningData]):
+    node_type = 'technical_planning'
+    data_type = TechnicalPlanningData
+
+    def initial_prompt(self, message: str) -> tuple[str, str]:
+        instructions = (
+            "Write a concise technical plan for the brief. Inspect the repository as needed. "
+            "Identify the affected components, implementation steps, and verification. "
+            "If the user asks for changes, reply with the complete revised plan. "
+            "When the user wants to proceed, call create_implementation_node with the complete plan. "
+            "If the user wants to split the work, call create_alignment_nodes with the complete list of goals."
         )
-        self.model = model
-        self.conversation = result.conversation
-        if result.paused:
-            return Outcome("paused")
-        self.data = {**(self.data or {}), "draft": result.output}
-        return Outcome("reply")
+        data = self.state.data
+        message = message or 'Draft the technical plan.'
+        return instructions, f"Brief\n{data.brief}\n\nRequest\n{message}"
 
-    def confirm_transition(self, base: Callable[[], str], *, delegating: bool) -> NewNode | None:
-        data = self.data or {}
-        draft = data.get('draft')
-        if not draft:
-            raise ValueError('There is no draft to approve yet.')
-        self.data = {**data, 'approved': draft, 'base_commit': base()}
-        return None if delegating else NewNode('implementation', {'plan_id': self.id})
+    def model_tools(self) -> tuple[str | Tool[None], ...]:
+        return (
+            'read_file', 'list_files', 'grep',
+            Tool(self.create_implementation_node, sequential=True),
+            Tool(self.create_alignment_nodes, sequential=True),
+        )
+
+    def create_implementation_node(
+        self, plan: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)],
+    ) -> str:
+        """Create an implementation node with the complete plan."""
+        state = NodeState(ImplementationData(
+            brief=self.state.data.brief, plan=plan, base_commit=self.state.data.base_commit,
+        ))
+        self.graph.create_nodes(self, Implementation, [state], 'handoff')
+        return 'Created an implementation node.'
+
+    def create_alignment_nodes(
+        self,
+        goals: Annotated[list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]],
+                         Field(min_length=2)],
+    ) -> str:
+        """Create one goal alignment node per goal."""
+        from .alignment import GoalAlignment, GoalAlignmentData
+
+        states = [NodeState(GoalAlignmentData(goal=goal, base_commit=self.state.data.base_commit)) for goal in goals]
+        self.graph.create_nodes(self, GoalAlignment, states, 'handoff')
+        return 'Created the goal alignment nodes.'

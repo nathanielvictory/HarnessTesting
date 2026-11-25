@@ -9,7 +9,7 @@ const nodeTypeLabels: Readonly<Record<string, string>> = {
   run_python: 'Run Python',
 };
 
-export function nodeLabel(node?: WorkNode): string {
+export function nodeLabel(node?: Pick<WorkNode, 'node_type'>): string {
   return node ? nodeTypeLabels[node.node_type] ?? node.node_type : 'No active step';
 }
 
